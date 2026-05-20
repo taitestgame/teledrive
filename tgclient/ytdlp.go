@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"os"
 	"os/exec"
@@ -331,6 +332,9 @@ func ProcessYTDLPUpload(ctx context.Context, url, formatID, path, taskID, downlo
 				UpdateTask(taskID, "downloading", 100, "ytdlp_thumbnail", owner)
 			}
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("[YTDLP scanner] error: %v", err)
 	}
 
 	// The wait is handled in the goroutine above, but we check if we actually finished correctly

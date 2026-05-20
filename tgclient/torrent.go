@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"os/exec"
 	pathpkg "path"
@@ -199,6 +200,9 @@ func ProcessTorrentUpload(ctx context.Context, input, path, taskID string, cfg *
 				}
 			}
 		}
+		if err := scanner.Err(); err != nil {
+			log.Printf("[Torrent stderr scanner] error: %v", err)
+		}
 	}()
 
 	scanner := bufio.NewScanner(stdout)
@@ -312,6 +316,9 @@ func ProcessTorrentUpload(ctx context.Context, input, path, taskID string, cfg *
 				lastPercent = p
 			}
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("[Torrent stdout scanner] error: %v", err)
 	}
 
 	if err := cmd.Wait(); err != nil {
