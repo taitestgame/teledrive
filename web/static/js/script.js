@@ -3239,7 +3239,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
         },
 
         async uploadSingleFile(file, taskId, targetPath, overwrite = false) {
-            const CHUNK_SIZE = 50 * 1024 * 1024;
+            const CHUNK_SIZE = 20 * 1024 * 1024;
             const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
             let hasError = false;
             let task = this.uploadQueue.find(t => t.id === taskId);
