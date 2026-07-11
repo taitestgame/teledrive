@@ -3321,7 +3321,11 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                             if (task && !task.statusText.includes(this.t('status_error'))) {
                                 const uploadedStr = this.formatBytes(task.uploadedBytes || 0);
                                 const totalStr = this.formatBytes(file.size);
-                                task.statusText = `${this.t('pushing', { uploaded: uploadedStr, total: totalStr })} ${retries < 3 ? '(' + this.t('retry') + ' ' + (3 - retries) + ')' : ''}`;
+                                const completedChunks = task._progressMap ? task._progressMap.filter((b, idx) => {
+                                    const expected = (idx === totalChunks - 1) ? (file.size % CHUNK_SIZE || CHUNK_SIZE) : CHUNK_SIZE;
+                                    return b >= expected;
+                                }).length : 0;
+                                task.statusText = `${this.t('pushing', { uploaded: uploadedStr, total: totalStr })} (Mảnh ${completedChunks}/${totalChunks}) ${retries < 3 ? '(' + this.t('retry') + ' ' + (3 - retries) + ')' : ''}`;
                             }
 
 
@@ -3343,12 +3347,12 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                                         clearInterval(watchdog);
                                         return;
                                     }
-                                    // If no progress event is received for 10 seconds, abort and trigger immediate retry
-                                    if (Date.now() - lastProgressTime > 10000) {
+                                    // If no progress event is received for 2 seconds, abort and trigger immediate retry
+                                    if (Date.now() - lastProgressTime > 2000) {
                                         clearInterval(watchdog);
                                         xhr.abort();
                                     }
-                                }, 2000);
+                                }, 500);
 
                                 const cleanupWatchdog = () => clearInterval(watchdog);
 
@@ -3385,7 +3389,11 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                                             // Real-time byte progress in status text
                                             const uploadedStr = this.formatBytes(task.uploadedBytes);
                                             const totalStr = this.formatBytes(file.size);
-                                            task.statusText = this.t('pushing', { uploaded: uploadedStr, total: totalStr });
+                                            const completedChunks = task._progressMap.filter((b, idx) => {
+                                                const expected = (idx === totalChunks - 1) ? (file.size % CHUNK_SIZE || CHUNK_SIZE) : CHUNK_SIZE;
+                                                return b >= expected;
+                                            }).length;
+                                            task.statusText = `${this.t('pushing', { uploaded: uploadedStr, total: totalStr })} (Mảnh ${completedChunks}/${totalChunks})`;
                                         }
                                     }
                                 };
