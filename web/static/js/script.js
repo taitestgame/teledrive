@@ -3239,346 +3239,538 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
         },
 
         async uploadSingleFile(file, taskId, targetPath, overwrite = false) {
-            const CHUNK_SIZE = 20 * 1024 * 1024;
-            const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
-            let hasError = false;
-            let task = this.uploadQueue.find(t => t.id === taskId);
-            if (task) {
-                task._progressMap = new Array(totalChunks).fill(0);
-            }
+            // CENTRALIZED CONSTANTS
+            const INITIAL_CHUNK_SIZE = 5 * 1024 * 1024;
+            const MIN_CHUNK_SIZE = 512 * 1024;
+            const MAX_CHUNK_SIZE = 50 * 1024 * 1024;
+            const INITIAL_CONCURRENCY = 3;
+            const MIN_CONCURRENCY = 1;
+            const MAX_CONCURRENCY = 3;
+            const WATCHDOG_INTERVAL = 250;
+            const STALL_TIMEOUT = 2000;
+            const TARGET_REQUEST_TIME = 20000;
+            const PREDICTIVE_SPLIT_LIMIT = 60000;
+            const CLIENT_HARD_LIMIT = 75000;
+            const MIN_STABLE_SAMPLES_FOR_GROWTH = 2;
+            const STARTING_TIMEOUT = 10000; // Time allowed in STARTING state before first progress event (10s)
 
-            // Check if server already has some chunks for this task
-            let existingChunks = [];
+            // RANGE HELPER FUNCTIONS
+            const normalizeRanges = (ranges) => {
+                if (!ranges || ranges.length === 0) return [];
+                const valid = [];
+                for (const r of ranges) {
+                    const start = typeof r.start_byte === 'number' ? r.start_byte : parseInt(r.start_byte);
+                    const end = typeof r.end_byte === 'number' ? r.end_byte : parseInt(r.end_byte);
+                    if (!isNaN(start) && !isNaN(end) && start >= 0 && end > start) {
+                        valid.push({ start_byte: start, end_byte: end });
+                    }
+                }
+                if (valid.length === 0) return [];
+                valid.sort((a, b) => a.start_byte - b.start_byte);
+                const result = [];
+                let current = { start_byte: valid[0].start_byte, end_byte: valid[0].end_byte };
+                for (let i = 1; i < valid.length; i++) {
+                    const next = valid[i];
+                    if (next.start_byte <= current.end_byte) {
+                        if (next.end_byte > current.end_byte) {
+                            current.end_byte = next.end_byte;
+                        }
+                    } else {
+                        result.push(current);
+                        current = { start_byte: next.start_byte, end_byte: next.end_byte };
+                    }
+                }
+                result.push(current);
+                return result;
+            };
+
+            const subtractRanges = (requested, confirmed) => {
+                let gaps = [ { start_byte: requested.start_byte, end_byte: requested.end_byte } ];
+                const normalizedConfirmed = normalizeRanges(confirmed);
+                for (const c of normalizedConfirmed) {
+                    const nextGaps = [];
+                    for (const g of gaps) {
+                        if (c.end_byte <= g.start_byte || c.start_byte >= g.end_byte) {
+                            nextGaps.push(g);
+                        } else {
+                            if (c.start_byte > g.start_byte) {
+                                nextGaps.push({ start_byte: g.start_byte, end_byte: c.start_byte });
+                            }
+                            if (c.end_byte < g.end_byte) {
+                                nextGaps.push({ start_byte: c.end_byte, end_byte: g.end_byte });
+                            }
+                        }
+                    }
+                    gaps = nextGaps;
+                }
+                return gaps;
+            };
+
+            // LOW-OVERHEAD DIAGNOSTIC LOGGING
+            const logDiag = (type, details) => {
+                console.log(`[TeleCloud Diagnostic] ${type}:`, details || '');
+            };
+
+            let task = this.uploadQueue.find(t => t.id === taskId);
+            if (!task) return;
+
+            logDiag('UPLOAD_START', { taskId, filename: file.name, size: file.size });
+
+            // Initialize task specific state
+            task.confirmedRanges = [];
+            task.pendingRanges = [];
+            task.inFlightRanges = [];
+            task.deferredRanges = [];
+            task.currentAdaptiveChunkSize = INITIAL_CHUNK_SIZE;
+            task.currentConcurrency = INITIAL_CONCURRENCY;
+            task.ewmaThroughput = 0;
+            task.stableSuccessCount = 0;
+            task.uploadedBytes = 0;
+            task.progress = 0;
+            task.hasError = false;
+
+            // Step 1: Query backend authoritative ranges
+            logDiag('CHECK_BACKEND', { taskId });
             try {
                 const checkRes = await fetch(`/api/upload/check/${taskId}`);
                 if (checkRes.ok) {
                     const checkData = await checkRes.json();
-                    existingChunks = checkData.chunks || [];
-                    if (task && existingChunks.length > 0) {
-                        existingChunks.forEach(chunkIndex => {
-                            const actualSize = (chunkIndex === totalChunks - 1) 
-                                ? (file.size % CHUNK_SIZE || CHUNK_SIZE) 
-                                : CHUNK_SIZE;
-                            task._progressMap[chunkIndex] = actualSize;
-                        });
-                        const totalUploaded = task._progressMap.reduce((a, b) => a + b, 0);
-                        task.uploadedBytes = Math.min(totalUploaded, file.size);
-                        task.progress = Math.round((task.uploadedBytes / file.size) * 50);
-                    }
+                    task.confirmedRanges = normalizeRanges(checkData.ranges || []);
+                    logDiag('BACKEND_ALREADY_CONFIRMED', { taskId, rangesCount: task.confirmedRanges.length });
                 }
             } catch (e) {
-                console.error("Resume check failed:", e);
+                console.error("Failed to query backend ranges on startup:", e);
             }
 
-            task = this.uploadQueue.find(t => t.id === taskId);
-            if (task) {
-                task.startTime = Date.now();
-                task.lastUpdateTime = task.startTime;
-            }
+            // Calculate overall missing ranges
+            const fullCoverage = { start_byte: 0, end_byte: file.size };
+            task.pendingRanges = subtractRanges(fullCoverage, task.confirmedRanges);
 
-            // Worker pool for parallel chunks
-            const CHUNK_CONCURRENCY = 3;
-            const chunkQueue = Array.from({ length: totalChunks }, (_, i) => i)
-                                    .filter(i => !existingChunks.includes(i));
-            
-            if (chunkQueue.length === 0 && totalChunks > 0) {
-                // All chunks already uploaded
-                task = this.uploadQueue.find(t => t.id === taskId);
-                if (task) {
-                    task.progress = 50;
-                    task.statusText = this.t('syncing_tg');
-                }
+            // If file is already fully uploaded, finish
+            const countConfirmedBytes = () => task.confirmedRanges.reduce((sum, r) => sum + (r.end_byte - r.start_byte), 0);
+            if (countConfirmedBytes() >= file.size && file.size > 0) {
+                logDiag('COMPLETE', { taskId, msg: "Already completed on backend" });
+                task.progress = 50;
+                task.statusText = this.t('syncing_tg');
+                // Poll/wait for WS or fallback polling
+                this.startFallbackPolling(taskId);
                 return;
             }
-            
-            const uploadWorker = async () => {
-                while (chunkQueue.length > 0 && !hasError) {
-                    const chunkIndex = chunkQueue.shift();
-                    let task = this.uploadQueue.find(t => t.id === taskId);
-                    if (!task || task.isCancelled) break;
 
-                    const start = chunkIndex * CHUNK_SIZE;
-                    const end = Math.min(start + CHUNK_SIZE, file.size);
-                    const chunk = file.slice(start, end);
-                    const fd = new FormData(); 
-                    fd.append('file', chunk); 
-                    fd.append('filename', file.name); 
-                    fd.append('path', targetPath); 
-                    fd.append('task_id', taskId); 
-                    fd.append('chunk_index', chunkIndex); 
-                    fd.append('total_chunks', totalChunks);
-                    fd.append('total_size', file.size);
-                    fd.append('chunk_size', CHUNK_SIZE);
-                    fd.append('overwrite', overwrite);
+            let schedulerResolve;
+            const schedulerPromise = new Promise(resolve => { schedulerResolve = resolve; });
 
-                    let retries = 3;
-                    let success = false;
-                    while (retries > 0 && !success) {
-                        task = this.uploadQueue.find(t => t.id === taskId);
-                        if (task && task.isCancelled) return; // Exit if already cancelled
+            const startXhr = (range) => {
+                const start = range.start_byte;
+                const end = range.end_byte;
+                const chunk = file.slice(start, end);
+                const fd = new FormData();
+                fd.append('file', chunk);
+                fd.append('filename', file.name);
+                fd.append('path', targetPath);
+                fd.append('task_id', taskId);
+                fd.append('start_byte', start.toString());
+                fd.append('end_byte', end.toString());
+                fd.append('total_size', file.size.toString());
+                fd.append('overwrite', overwrite ? "true" : "false");
 
-                        try {
-                            if (task && !task.statusText.includes(this.t('status_error'))) {
-                                const uploadedStr = this.formatBytes(task.uploadedBytes || 0);
-                                const totalStr = this.formatBytes(file.size);
-                                const completedChunks = task._progressMap ? task._progressMap.filter((b, idx) => {
-                                    const expected = (idx === totalChunks - 1) ? (file.size % CHUNK_SIZE || CHUNK_SIZE) : CHUNK_SIZE;
-                                    return b >= expected;
-                                }).length : 0;
-                                task.statusText = `${this.t('pushing', { uploaded: uploadedStr, total: totalStr })} (Mảnh ${completedChunks}/${totalChunks}) ${retries < 3 ? '(' + this.t('retry') + ' ' + (3 - retries) + ')' : ''}`;
-                            }
+                const xhr = new XMLHttpRequest();
+                if (task) {
+                    if (!task._xhrs) task._xhrs = [];
+                    task._xhrs.push(xhr);
+                }
 
+                xhr.open('POST', '/api/upload');
+                xhr.setRequestHeader('X-CSRF-Token', TeleCloud.getCsrfToken());
 
-                            const result = await new Promise((resolve, reject) => {
-                                const xhr = new XMLHttpRequest();
-                                if (task) {
-                                    if (!task._xhrs) task._xhrs = [];
-                                    task._xhrs.push(xhr);
+                const inFlightRecord = {
+                    range,
+                    xhr,
+                    lifecycleState: "STARTING",
+                    requestStartTime: Date.now(),
+                    firstProgressTime: null,
+                    lastMeaningfulProgressTime: Date.now(),
+                    previousLoadedBytes: 0,
+                    currentLoadedBytes: 0,
+                    retryCount: 0,
+                    recoveryStarted: false
+                };
+                task.inFlightRanges.push(inFlightRecord);
+
+                let lastProgressTime = Date.now();
+
+                const watchdog = setInterval(() => {
+                    const currentTask = this.uploadQueue.find(t => t.id === taskId);
+                    if (!currentTask || currentTask.isCancelled || currentTask.hasError) {
+                        clearInterval(watchdog);
+                        return;
+                    }
+
+                    const now = Date.now();
+                    if (inFlightRecord.lifecycleState === "STARTING") {
+                        if (now - inFlightRecord.requestStartTime > STARTING_TIMEOUT) {
+                            logDiag('STALL_TIMEOUT', { range, state: "STARTING" });
+                            clearInterval(watchdog);
+                            inFlightRecord.recoveryStarted = true;
+                            xhr.abort();
+                            handleRequestFailure(inFlightRecord, "STARTING_TIMEOUT");
+                        }
+                    } else if (inFlightRecord.lifecycleState === "TRANSFERRING") {
+                        // 2-second stall watchdog
+                        if (now - inFlightRecord.lastMeaningfulProgressTime > STALL_TIMEOUT) {
+                            logDiag('STALL_TIMEOUT', { range, state: "TRANSFERRING" });
+                            clearInterval(watchdog);
+                            inFlightRecord.recoveryStarted = true;
+                            xhr.abort();
+                            handleRequestFailure(inFlightRecord, "STALL");
+                        } else {
+                            // Predictive timeout protection
+                            const elapsed = (now - inFlightRecord.requestStartTime) / 1000;
+                            if (elapsed > 5 && task.ewmaThroughput > 0) {
+                                const remainingBytes = (end - start) - inFlightRecord.currentLoadedBytes;
+                                const predictedTotalDuration = (elapsed * 1000) + (remainingBytes / task.ewmaThroughput) * 1000;
+                                if (predictedTotalDuration > PREDICTIVE_SPLIT_LIMIT) {
+                                    logDiag('PREDICTIVE_TIMEOUT_RISK', { range, predictedTotalDuration });
+                                    clearInterval(watchdog);
+                                    inFlightRecord.recoveryStarted = true;
+                                    xhr.abort();
+                                    handleRequestFailure(inFlightRecord, "PREDICTIVE_TIMEOUT");
                                 }
-
-                                xhr.open('POST', '/api/upload');
-                                xhr.setRequestHeader('X-CSRF-Token', TeleCloud.getCsrfToken());
-                                xhr.timeout = 180000; // Large overall timeout to allow slow connections
-                                
-                                let lastProgressTime = Date.now();
-                                const watchdog = setInterval(() => {
-                                    const t = this.uploadQueue.find(q => q.id === taskId);
-                                    if (!t || t.isCancelled) {
-                                        clearInterval(watchdog);
-                                        return;
-                                    }
-                                    // If no progress event is received for 2 seconds, abort and trigger immediate retry
-                                    if (Date.now() - lastProgressTime > 2000) {
-                                        clearInterval(watchdog);
-                                        xhr.abort();
-                                    }
-                                }, 500);
-
-                                const cleanupWatchdog = () => clearInterval(watchdog);
-
-                                xhr.upload.onprogress = (e) => {
-                                    if (e.lengthComputable) {
-                                        lastProgressTime = Date.now(); // Reset progress timer on any active upload progress
-                                        const now = Date.now();
-                                        const task = this.uploadQueue.find(t => t.id === taskId);
-                                        if (task && task._progressMap) {
-                                            task._progressMap[chunkIndex] = e.loaded;
-                                            
-                                            const totalUploaded = task._progressMap.reduce((a, b) => a + b, 0);
-                                            task.uploadedBytes = Math.min(totalUploaded, file.size);
-                                            
-                                            if (task.lastUpdateTime && task.lastUpdateTime < now) {
-                                                const elapsed = (now - task.lastUpdateTime) / 1000;
-                                                const bytesSentSinceLast = totalUploaded - (task.lastUploadedBytes || 0);
-                                                if (elapsed > 0.1) {
-                                                    const instantSpeed = bytesSentSinceLast / elapsed;
-                                                    if (task.speed === 0) task.speed = instantSpeed;
-                                                    else task.speed = (task.speed * 0.8) + (instantSpeed * 0.2);
-                                                    
-                                                    task.lastUpdateTime = now;
-                                                    task.lastUploadedBytes = totalUploaded;
-                                                }
-                                            } else {
-                                                task.lastUpdateTime = now;
-                                                task.lastUploadedBytes = totalUploaded;
-                                            }
-
-                                            const overallPercent = (task.uploadedBytes / file.size) * 50;
-                                            task.progress = Math.min(50, Math.round(overallPercent));
-
-                                            // Real-time byte progress in status text
-                                            const uploadedStr = this.formatBytes(task.uploadedBytes);
-                                            const totalStr = this.formatBytes(file.size);
-                                            const completedChunks = task._progressMap.filter((b, idx) => {
-                                                const expected = (idx === totalChunks - 1) ? (file.size % CHUNK_SIZE || CHUNK_SIZE) : CHUNK_SIZE;
-                                                return b >= expected;
-                                            }).length;
-                                            task.statusText = `${this.t('pushing', { uploaded: uploadedStr, total: totalStr })} (Mảnh ${completedChunks}/${totalChunks})`;
-                                        }
-                                    }
-                                };
-                                xhr.onload = () => {
-                                    cleanupWatchdog();
-                                    const task = this.uploadQueue.find(t => t.id === taskId);
-                                    if (task && task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
-                                    
-                                    if (xhr.status >= 200 && xhr.status < 300) {
-                                        // Mark chunk as fully completed in the map
-                                        if (task && task._progressMap) {
-                                            task._progressMap[chunkIndex] = chunk.size;
-                                        }
-                                        try { resolve(JSON.parse(xhr.responseText)); } catch(e) { reject(e); }
-                                    } else {
-                                        try {
-                                            const err = JSON.parse(xhr.responseText);
-                                            reject(new Error(err.error || `Upload failed (${xhr.status})`));
-                                        } catch(e) {
-                                            reject(new Error(`Upload failed (${xhr.status})`));
-                                        }
-                                    }
-                                };
-                                xhr.onerror = () => {
-                                    cleanupWatchdog();
-                                    const task = this.uploadQueue.find(t => t.id === taskId);
-                                    if (task) {
-                                        if (task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
-                                    }
-                                    reject(new Error(this.t('conn_error')));
-                                };
-                                xhr.ontimeout = () => {
-                                    cleanupWatchdog();
-                                    const task = this.uploadQueue.find(t => t.id === taskId);
-                                    if (task) {
-                                        if (task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
-                                    }
-                                    reject(new Error(this.t('conn_error') + ' (Timeout)'));
-                                };
-                                xhr.onabort = () => {
-                                    cleanupWatchdog();
-                                    const task = this.uploadQueue.find(t => t.id === taskId);
-                                    if (task) {
-                                        if (task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
-                                    }
-                                    const msg = (task && task.isCancelled) ? this.t('cancelled') : this.t('conn_error');
-                                    reject(new Error(msg));
-                                };
-                                xhr.send(fd);
-                            });
-                            
-                            success = true;
-                            if (task) {
-                                const totalUploaded = task._progressMap.reduce((a, b) => a + b, 0);
-                                task.uploadedBytes = Math.min(totalUploaded, file.size);
-                                task.progress = Math.round((task.uploadedBytes / file.size) * 50);
-                                if (result.status === "processing_telegram") {
-                                    task.statusText = this.t('syncing_tg');
-                                }
-                            }
-                        } catch (err) { 
-                            retries--;
-                            console.error(`Upload chunk ${chunkIndex} error (retries left: ${retries}):`, err);
-                            if (retries === 0) {
-                                let task = this.uploadQueue.find(t => t.id === taskId); 
-                                if(task && !task.isCancelled) {
-                                    task.statusText = this.t('conn_error');
-                                    task.hasError = true;
-                                }
-                                hasError = true;
-                            } else {
-                                await new Promise(r => setTimeout(r, 2000)); // Wait before retry
                             }
                         }
                     }
-                }
-            };
 
-            const workers = [];
-            for (let i = 0; i < Math.min(CHUNK_CONCURRENCY, totalChunks); i++) {
-                workers.push(uploadWorker());
-            }
-            await Promise.all(workers);
+                    // 75-second hard limit
+                    if (!inFlightRecord.recoveryStarted && (now - inFlightRecord.requestStartTime > CLIENT_HARD_LIMIT)) {
+                        logDiag('CLIENT_HARD_LIMIT', { range });
+                        clearInterval(watchdog);
+                        inFlightRecord.recoveryStarted = true;
+                        xhr.abort();
+                        handleRequestFailure(inFlightRecord, "HARD_LIMIT");
+                    }
+                }, WATCHDOG_INTERVAL);
 
-            // Fallback polling: if WS missed the `done`/`error` message (common when uploading
-            // many files simultaneously and WS reconnects or browser is overloaded), poll the
-            // task status API until we get a terminal state. Max 10 minutes.
-            if (!hasError) {
-                const POLL_INTERVAL = 3000;
-                const POLL_TIMEOUT = 10 * 60 * 1000;
-                const pollStart = Date.now();
+                xhr.upload.onprogress = (e) => {
+                    if (e.lengthComputable) {
+                        const now = Date.now();
+                        if (inFlightRecord.lifecycleState === "STARTING") {
+                            inFlightRecord.lifecycleState = "TRANSFERRING";
+                            inFlightRecord.firstProgressTime = now;
+                        }
 
-                const pollTask = async () => {
-                    while (Date.now() - pollStart < POLL_TIMEOUT) {
-                        // Stop polling if WS already updated the task to a terminal state
-                        const t = this.uploadQueue.find(q => q.id === taskId);
-                        if (!t) return; // Task removed from queue
-                        if (t.status === 'done' || t.isCancelled || t.hasError) return;
+                        if (e.loaded > inFlightRecord.previousLoadedBytes) {
+                            inFlightRecord.lastMeaningfulProgressTime = now;
+                            const delta = e.loaded - inFlightRecord.previousLoadedBytes;
+                            inFlightRecord.previousLoadedBytes = e.loaded;
+                            inFlightRecord.currentLoadedBytes = e.loaded;
 
-                        await new Promise(r => setTimeout(r, POLL_INTERVAL));
-
-                        try {
-                            const res = await fetch('/api/tasks');
-                            if (!res.ok) continue;
-                            const data = await res.json();
-                            const serverTask = data.tasks && data.tasks[taskId];
-                            const task = this.uploadQueue.find(q => q.id === taskId);
-                            if (!task) return;
-
-                            if (!serverTask) {
-                                // Task no longer on server — may have been cleaned up after done
-                                // Give WS a little more time before giving up
-                                await new Promise(r => setTimeout(r, 2000));
-                                const t2 = this.uploadQueue.find(q => q.id === taskId);
-                                if (t2 && t2.status !== 'done' && !t2.hasError) {
-                                    // Still not updated — assume done (task cleaned up = completed)
-                                    task.progress = 100;
-                                    task.status = 'done';
-                                    task.statusText = this.t('done');
-                                    task.hasError = false;
-                                    this.fetchFiles(true);
-                                    task.countdown = 5;
-                                    const timer = setInterval(() => {
-                                        task.countdown--;
-                                        if (task.countdown <= 0) {
-                                            clearInterval(timer);
-                                            this.uploadQueue = this.uploadQueue.filter(q => q.id !== taskId);
-                                        }
-                                    }, 1000);
-                                }
-                                return;
-                            }
-
-                            if (serverTask.status === 'done') {
-                                task.progress = 100;
-                                task.status = 'done';
-                                task.statusText = this.t('done');
-                                task.hasError = false;
-                                if (serverTask.file_id) task.fileId = serverTask.file_id;
-                                this.fetchFiles(true);
-                                task.countdown = 5;
-                                const timer = setInterval(() => {
-                                    task.countdown--;
-                                    if (task.countdown <= 0) {
-                                        clearInterval(timer);
-                                        this.uploadQueue = this.uploadQueue.filter(q => q.id !== taskId);
-                                    }
-                                }, 1000);
-                                return;
-                            } else if (serverTask.status === 'error') {
-                                const errorMsg = serverTask.message || '';
-                                let displayError;
-                                const colonIdx = errorMsg.indexOf(': ');
-                                if (colonIdx > 0) {
-                                    const keyPart = errorMsg.substring(0, colonIdx);
-                                    const detailPart = errorMsg.substring(colonIdx + 2);
-                                    const translatedKey = this.t(keyPart);
-                                    displayError = (translatedKey !== keyPart) ? translatedKey + ' (' + detailPart + ')' : errorMsg;
+                            const sampleElapsed = (now - lastProgressTime) / 1000;
+                            if (sampleElapsed > 0.05 && delta > 0) {
+                                const instThroughput = delta / sampleElapsed;
+                                if (task.ewmaThroughput === 0) {
+                                    task.ewmaThroughput = instThroughput;
                                 } else {
-                                    const translated = this.t(errorMsg);
-                                    displayError = (translated !== errorMsg) ? translated : errorMsg;
+                                    task.ewmaThroughput = (task.ewmaThroughput * 0.8) + (instThroughput * 0.2);
                                 }
-                                task.statusText = this.t('status_error') + ': ' + displayError;
-                                task.hasError = true;
-                                task.status = 'error';
-                                return;
-                            } else if (serverTask.status === 'cancelled') {
-                                task.statusText = this.t('cancelled');
-                                task.isCancelled = true;
-                                task.status = 'cancelled';
-                                return;
+                                task.speed = task.ewmaThroughput;
                             }
-                            // Still in progress — update progress display from server data
-                            if (serverTask.status === 'telegram' && serverTask.percent !== undefined) {
-                                task.progress = 50 + Math.round(serverTask.percent / 2);
-                                task.statusText = this.t('telegram');
-                            }
-                        } catch (e) {
-                            console.warn('[Poll] Task status check failed:', e);
+                            lastProgressTime = now;
+
+                            // Update progress UI using unique confirmed bytes + in-flight loaded bytes
+                            const confirmedBytes = countConfirmedBytes();
+                            const activeInFlightBytes = task.inFlightRanges.reduce((sum, r) => sum + r.currentLoadedBytes, 0);
+                            task.uploadedBytes = Math.min(file.size, confirmedBytes + activeInFlightBytes);
+                            task.progress = Math.min(50, Math.round((task.uploadedBytes / file.size) * 50));
+
+                            const uploadedStr = this.formatBytes(task.uploadedBytes);
+                            const totalStr = this.formatBytes(file.size);
+                            const completedChunks = Math.round(confirmedBytes / task.currentAdaptiveChunkSize);
+                            const estimatedTotalChunks = Math.ceil(file.size / task.currentAdaptiveChunkSize);
+                            task.statusText = `${this.t('pushing', { uploaded: uploadedStr, total: totalStr })} (Mảnh ${completedChunks}/${estimatedTotalChunks})`;
                         }
                     }
                 };
 
-                pollTask();
+                xhr.onload = () => {
+                    clearInterval(watchdog);
+                    if (task && task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
+                    
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        inFlightRecord.lifecycleState = "COMPLETED";
+                        task.inFlightRanges = task.inFlightRanges.filter(r => r !== inFlightRecord);
+                        
+                        task.confirmedRanges.push(range);
+                        task.confirmedRanges = normalizeRanges(task.confirmedRanges);
+
+                        // Success behavior: Adaptive chunk growth
+                        task.stableSuccessCount++;
+                        if (task.stableSuccessCount >= MIN_STABLE_SAMPLES_FOR_GROWTH) {
+                            // Target Chunk Size calculation
+                            if (task.ewmaThroughput > 0) {
+                                const nextSize = task.ewmaThroughput * (TARGET_REQUEST_TIME / 1000);
+                                task.currentAdaptiveChunkSize = Math.max(MIN_CHUNK_SIZE, Math.min(MAX_CHUNK_SIZE, nextSize));
+                            } else {
+                                task.currentAdaptiveChunkSize = Math.min(MAX_CHUNK_SIZE, task.currentAdaptiveChunkSize * 1.5);
+                            }
+                            // Concurrency growth
+                            if (task.currentConcurrency < MAX_CONCURRENCY) {
+                                task.currentConcurrency++;
+                                logDiag('CONCURRENCY_INCREASE', { concurrency: task.currentConcurrency });
+                            }
+                            task.stableSuccessCount = 0;
+                            logDiag('CHUNK_SIZE_UPDATE', { chunkSize: task.currentAdaptiveChunkSize });
+                        }
+
+                        logDiag('UPLOAD_SUCCESS', { range });
+
+                        try {
+                            const result = JSON.parse(xhr.responseText);
+                            if (result.status === "processing_telegram") {
+                                task.statusText = this.t('syncing_tg');
+                            }
+                        } catch (e) {}
+
+                        scheduleNext();
+                    } else {
+                        let errMsg = `Upload failed (${xhr.status})`;
+                        try {
+                            const errJson = JSON.parse(xhr.responseText);
+                            if (errJson.error) errMsg = errJson.error;
+                        } catch (e) {}
+                        handleRequestFailure(inFlightRecord, errMsg);
+                    }
+                };
+
+                xhr.onerror = () => {
+                    clearInterval(watchdog);
+                    if (task && task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
+                    handleRequestFailure(inFlightRecord, "Network Error");
+                };
+
+                xhr.onabort = () => {
+                    clearInterval(watchdog);
+                    if (task && task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
+                    // Do not handle abort here if it was already handled by watchdog/predictive aborts
+                    if (!inFlightRecord.recoveryStarted) {
+                        handleRequestFailure(inFlightRecord, "Aborted");
+                    }
+                };
+
+                xhr.send(fd);
+            };
+
+            const handleRequestFailure = async (inFlightRecord, reason) => {
+                inFlightRecord.lifecycleState = "FAILED";
+                task.inFlightRanges = task.inFlightRanges.filter(r => r !== inFlightRecord);
+                
+                // Adaptive Sizing reduction
+                task.stableSuccessCount = 0;
+                task.currentAdaptiveChunkSize = Math.max(MIN_CHUNK_SIZE, Math.floor(task.currentAdaptiveChunkSize / 2));
+                task.currentConcurrency = Math.max(MIN_CONCURRENCY, task.currentConcurrency - 1);
+                logDiag('CONCURRENCY_DECREASE', { concurrency: task.currentConcurrency });
+                logDiag('CHUNK_SIZE_UPDATE', { chunkSize: task.currentAdaptiveChunkSize });
+
+                // Query Backend Authoritative Ranges to subtract confirmed parts
+                logDiag('CHECK_BACKEND', { taskId, reason: "Failure recovery" });
+                try {
+                    const checkRes = await fetch(`/api/upload/check/${taskId}`);
+                    if (checkRes.ok) {
+                        const checkData = await checkRes.json();
+                        task.confirmedRanges = normalizeRanges(checkData.ranges || []);
+                    }
+                } catch (e) {
+                    console.error("Failed to query backend ranges during recovery:", e);
+                }
+
+                // Calculate missing subranges of the failed request
+                const missingGaps = subtractRanges(inFlightRecord.range, task.confirmedRanges);
+                if (missingGaps.length > 0) {
+                    for (const gap of missingGaps) {
+                        const gapSize = gap.end_byte - gap.start_byte;
+                        if (gapSize <= MIN_CHUNK_SIZE) {
+                            // Retry minimum range with retry count
+                            inFlightRecord.retryCount++;
+                            if (inFlightRecord.retryCount > 5) {
+                                logDiag('DEFER_RANGE', { gap });
+                                task.deferredRanges.push(gap);
+                            } else {
+                                logDiag('RETRY_MIN_RANGE', { gap, retry: inFlightRecord.retryCount });
+                                task.pendingRanges.unshift(gap);
+                            }
+                        } else {
+                            // Split and requeue
+                            const mid = gap.start_byte + Math.floor(gapSize / 2);
+                            logDiag('SPLIT_RANGE', { gap, splitAt: mid });
+                            task.pendingRanges.unshift({ start_byte: mid, end_byte: gap.end_byte });
+                            task.pendingRanges.unshift({ start_byte: gap.start_byte, end_byte: mid });
+                        }
+                    }
+                }
+
+                scheduleNext();
+            };
+
+            const scheduleNext = () => {
+                const currentTask = this.uploadQueue.find(t => t.id === taskId);
+                if (!currentTask || currentTask.isCancelled) {
+                    schedulerResolve();
+                    return;
+                }
+
+                if (task.hasError) {
+                    schedulerResolve();
+                    return;
+                }
+
+                const confirmedBytes = countConfirmedBytes();
+                if (confirmedBytes >= file.size) {
+                    // Exact coverage completion
+                    logDiag('COMPLETE', { taskId });
+                    task.progress = 50;
+                    task.statusText = this.t('syncing_tg');
+                    schedulerResolve();
+                    return;
+                }
+
+                // If pending is empty but we have deferred ranges, retry them now
+                if (task.pendingRanges.length === 0 && task.inFlightRanges.length === 0 && task.deferredRanges.length > 0) {
+                    logDiag('RESUME_RANGE', { deferredCount: task.deferredRanges.length });
+                    task.pendingRanges = [...task.deferredRanges];
+                    task.deferredRanges = [];
+                }
+
+                // If all ranges fail completely and nothing is pending/in-flight, throw error
+                if (task.pendingRanges.length === 0 && task.inFlightRanges.length === 0) {
+                    logDiag('FAILED', { taskId, reason: "No more ranges to upload and target size not met" });
+                    task.statusText = this.t('conn_error');
+                    task.hasError = true;
+                    schedulerResolve();
+                    return;
+                }
+
+                // Dynamic scheduling loop: start requests up to current adaptive concurrency limit
+                while (task.inFlightRanges.length < task.currentConcurrency && task.pendingRanges.length > 0) {
+                    // Pop next missing range
+                    const R = task.pendingRanges.shift();
+                    const size = Math.min(task.currentAdaptiveChunkSize, R.end_byte - R.start_byte);
+                    const subR = { start_byte: R.start_byte, end_byte: R.start_byte + size };
+                    
+                    // If there is remainder, push it back to the pending queue
+                    if (R.start_byte + size < R.end_byte) {
+                        task.pendingRanges.unshift({ start_byte: R.start_byte + size, end_byte: R.end_byte });
+                    }
+
+                    // Reserve and execute before any asynchronous delay
+                    startXhr(subR);
+                }
+            };
+
+            // Start the first batch of requests
+            scheduleNext();
+
+            // Wait for completion
+            await schedulerPromise;
+
+            // Start status polling to wait for Telegram sync
+            if (!task.hasError && !task.isCancelled) {
+                this.startFallbackPolling(taskId);
             }
+        },
+
+        // Helper method to poll task status until done/error/cancelled
+        startFallbackPolling(taskId) {
+            const POLL_INTERVAL = 3000;
+            const POLL_TIMEOUT = 10 * 60 * 1000;
+            const pollStart = Date.now();
+
+            const pollTask = async () => {
+                while (Date.now() - pollStart < POLL_TIMEOUT) {
+                    const t = this.uploadQueue.find(q => q.id === taskId);
+                    if (!t) return;
+                    if (t.status === 'done' || t.isCancelled || t.hasError) return;
+
+                    await new Promise(r => setTimeout(r, POLL_INTERVAL));
+
+                    try {
+                        const res = await fetch('/api/tasks');
+                        if (!res.ok) continue;
+                        const data = await res.json();
+                        const serverTask = data.tasks && data.tasks[taskId];
+                        const currentTask = this.uploadQueue.find(q => q.id === taskId);
+                        if (!currentTask) return;
+
+                        if (!serverTask) {
+                            await new Promise(r => setTimeout(r, 2000));
+                            const t2 = this.uploadQueue.find(q => q.id === taskId);
+                            if (t2 && t2.status !== 'done' && !t2.hasError) {
+                                currentTask.progress = 100;
+                                currentTask.status = 'done';
+                                currentTask.statusText = this.t('done');
+                                currentTask.hasError = false;
+                                this.fetchFiles(true);
+                                currentTask.countdown = 5;
+                                const timer = setInterval(() => {
+                                    currentTask.countdown--;
+                                    if (currentTask.countdown <= 0) {
+                                        clearInterval(timer);
+                                        this.uploadQueue = this.uploadQueue.filter(q => q.id !== taskId);
+                                    }
+                                }, 1000);
+                            }
+                            return;
+                        }
+
+                        if (serverTask.status === 'done') {
+                            currentTask.progress = 100;
+                            currentTask.status = 'done';
+                            currentTask.statusText = this.t('done');
+                            currentTask.hasError = false;
+                            if (serverTask.file_id) currentTask.fileId = serverTask.file_id;
+                            this.fetchFiles(true);
+                            currentTask.countdown = 5;
+                            const timer = setInterval(() => {
+                                currentTask.countdown--;
+                                if (currentTask.countdown <= 0) {
+                                    clearInterval(timer);
+                                    this.uploadQueue = this.uploadQueue.filter(q => q.id !== taskId);
+                                }
+                            }, 1000);
+                            return;
+                        } else if (serverTask.status === 'error') {
+                            const errorMsg = serverTask.message || '';
+                            let displayError;
+                            const colonIdx = errorMsg.indexOf(': ');
+                            if (colonIdx > 0) {
+                                const keyPart = errorMsg.substring(0, colonIdx);
+                                const detailPart = errorMsg.substring(colonIdx + 2);
+                                const translatedKey = this.t(keyPart);
+                                displayError = (translatedKey !== keyPart) ? translatedKey + ' (' + detailPart + ')' : errorMsg;
+                            } else {
+                                const translated = this.t(errorMsg);
+                                displayError = (translated !== errorMsg) ? translated : errorMsg;
+                            }
+                            currentTask.statusText = this.t('status_error') + ': ' + displayError;
+                            currentTask.hasError = true;
+                            currentTask.status = 'error';
+                            return;
+                        } else if (serverTask.status === 'cancelled') {
+                            currentTask.statusText = this.t('cancelled');
+                            currentTask.isCancelled = true;
+                            currentTask.status = 'cancelled';
+                            return;
+                        }
+
+                        if (serverTask.status === 'telegram' && serverTask.percent !== undefined) {
+                            currentTask.progress = 50 + Math.round(serverTask.percent / 2);
+                            currentTask.statusText = this.t('telegram');
+                        }
+                    } catch (e) {
+                        console.warn('[Poll] Task status check failed:', e);
+                    }
+                }
+            };
+
+            pollTask();
         },
         async toggleShare(file) {
             const targetFile = this.files.find(f => f.id === file.id);
