@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# Khóa chế độ ngủ của Android để tránh treo mạng khi tải file lớn
+if command -v termux-wake-lock &>/dev/null; then
+    termux-wake-lock
+fi
+
 # Thư mục hiện tại của script
 cd "$(dirname "$0")"
 
