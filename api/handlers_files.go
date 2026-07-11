@@ -252,6 +252,20 @@ func (h *Handler) handlePostFolders(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success"})
 }
 
+// offsetWriter wraps an *os.File to implement io.Writer using WriteAt at a
+// fixed starting offset. This lets io.Copy stream multipart chunk data directly
+// to the correct position on disk without buffering the whole chunk in RAM.
+type offsetWriter struct {
+	f      *os.File
+	offset int64
+}
+
+func (ow *offsetWriter) Write(p []byte) (int, error) {
+	n, err := ow.f.WriteAt(p, ow.offset)
+	ow.offset += int64(n)
+	return n, err
+}
+
 func (h *Handler) handlePostUpload(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
@@ -259,6 +273,8 @@ func (h *Handler) handlePostUpload(c *gin.Context) {
 		return
 	}
 	defer file.Close()
+
+
 
 	filename := filepath.Base(c.PostForm("filename"))
 	path := c.PostForm("path")
@@ -286,21 +302,53 @@ func (h *Handler) handlePostUpload(c *gin.Context) {
 		return
 	}
 
-	chunkIndex, err := strconv.Atoi(c.PostForm("chunk_index"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid chunk_index"})
-		return
+	var startByte, endByte, totalSize int64
+	var isRangeUpload bool
+
+	startByteStr := c.PostForm("start_byte")
+	endByteStr := c.PostForm("end_byte")
+	totalSizeStr := c.PostForm("total_size")
+	if totalSizeStr == "" {
+		totalSizeStr = c.PostForm("file_size")
 	}
-	totalChunks, err := strconv.Atoi(c.PostForm("total_chunks"))
-	if err != nil || totalChunks <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid total_chunks"})
+
+	if startByteStr != "" && endByteStr != "" {
+		isRangeUpload = true
+		startByte, _ = strconv.ParseInt(startByteStr, 10, 64)
+		endByte, _ = strconv.ParseInt(endByteStr, 10, 64)
+		totalSize, _ = strconv.ParseInt(totalSizeStr, 10, 64)
+	} else {
+		// Fallback for legacy chunk uploaders
+		chunkIndex, err := strconv.Atoi(c.PostForm("chunk_index"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid chunk_index or start_byte"})
+			return
+		}
+		totalChunks, err := strconv.Atoi(c.PostForm("total_chunks"))
+		if err != nil || totalChunks <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid total_chunks"})
+			return
+		}
+		chunkSize, err := strconv.ParseInt(c.PostForm("chunk_size"), 10, 64)
+		if err != nil || chunkSize <= 0 {
+			chunkSize = 50 * 1024 * 1024
+		}
+		startByte = int64(chunkIndex) * chunkSize
+		endByte = startByte + header.Size // use multipart header size (no body buffering needed)
+
+		totalSize, _ = strconv.ParseInt(totalSizeStr, 10, 64)
+		if totalSize <= 0 {
+			totalSize = int64(totalChunks) * chunkSize
+		}
+	}
+
+	if startByte < 0 || endByte <= startByte || totalSize <= 0 || endByte > totalSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_range_parameters"})
 		return
 	}
 
-	if chunkIndex < 0 || chunkIndex >= totalChunks {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "chunk_index out of range"})
-		return
-	}
+	expectedLen := endByte - startByte
+
 
 	tempDir := h.cfg.TempDir
 	os.MkdirAll(tempDir, os.ModePerm)
@@ -313,48 +361,8 @@ func (h *Handler) handlePostUpload(c *gin.Context) {
 		return
 	}
 
-	chunkSize, err := strconv.ParseInt(c.PostForm("chunk_size"), 10, 64)
-	if err != nil || chunkSize <= 0 {
-		chunkSize = 50 * 1024 * 1024 // Default fallback
-	}
-	offset := int64(chunkIndex) * int64(chunkSize)
-
-	totalSize, _ := strconv.ParseInt(c.PostForm("total_size"), 10, 64)
-	if totalSize <= 0 {
-		totalSize = int64(totalChunks) * int64(chunkSize) // Fallback estimation
-	}
-
-	val, loaded := chunkTrackerSync.LoadOrStore(taskID, &chunkState{
-		received: make(map[int]bool),
-	})
-	state := val.(*chunkState)
-
-	if !loaded {
-		// Task first loaded in memory in this session (e.g. after server restart or resume)
-		// Load existing chunks from DB to synchronise the state.
-		var dbChunks []int
-		err := database.RODB.Select(&dbChunks, "SELECT chunk_index FROM upload_chunks WHERE task_id = ?", taskID)
-		if err == nil {
-			state.Lock()
-			for _, chIdx := range dbChunks {
-				state.received[chIdx] = true
-			}
-			state.Unlock()
-		}
-	}
-
-	// Update temporary file path with taskID and safe filename
-	tempFilePath = filepath.Join(tempDir, taskID+"_"+safeFilename)
-
-	chunkData, err := io.ReadAll(file)
-	if err != nil {
-		log.Printf("UPLOAD ERROR: Failed to read chunk: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed_to_read_chunk"})
-		return
-	}
-
 	overwriteFlag := c.PostForm("overwrite") == "true"
-	database.DB.Exec(database.InsertIgnoreSQL("upload_tasks", "id, filename, owner, overwrite", "?, ?, ?, ?"), taskID, safeFilename, username, overwriteFlag)
+	database.DB.Exec(database.InsertIgnoreSQL("upload_tasks", "id, filename, owner, overwrite, total_size, status", "?, ?, ?, ?, ?, ?"), taskID, safeFilename, username, overwriteFlag, totalSize, "uploading")
 
 	out, err := os.OpenFile(tempFilePath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -362,50 +370,93 @@ func (h *Handler) handlePostUpload(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed_to_open_temp_file"})
 		return
 	}
-	_, err = out.WriteAt(chunkData, offset)
+	// Stream data directly from network to disk — no RAM buffer for large chunks.
+	ow := &offsetWriter{f: out, offset: startByte}
+	written, err := io.Copy(ow, io.LimitReader(file, expectedLen))
 	out.Close()
 	if err != nil {
-		log.Printf("UPLOAD ERROR: Failed to write chunk to %s: %v", tempFilePath, err)
+		log.Printf("UPLOAD ERROR: Failed to stream data to %s: %v", tempFilePath, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed_to_write_chunk"})
 		return
 	}
-
-	_, err = database.DB.Exec(database.InsertIgnoreSQL("upload_chunks", "task_id, chunk_index", "?, ?"), taskID, chunkIndex)
-	if err != nil {
-		log.Printf("UPLOAD ERROR: Failed to record chunk in DB: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed_to_record_chunk"})
+	if written != expectedLen {
+		log.Printf("UPLOAD ERROR: Stream truncated: wrote %d, expected %d", written, expectedLen)
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("stream truncated: got %d, expected %d", written, expectedLen)})
 		return
 	}
 
-	state.Lock()
-	state.received[chunkIndex] = true
-
-	// ✅ OPTIMIZATION: Count chunks directly from memory map, eliminating hot-path SQLite SELECT COUNT(*) queries.
-	actualReceived := len(state.received)
-
-	// Update task with current progress to show speed in backend
-	uploadedBytes := int64(actualReceived) * int64(chunkSize)
-	if uploadedBytes > totalSize {
-		uploadedBytes = totalSize
+	// Insert range in DB
+	_, err = database.DB.Exec(database.InsertIgnoreSQL("upload_ranges", "task_id, start_byte, end_byte", "?, ?, ?"), taskID, startByte, endByte)
+	if err != nil {
+		log.Printf("UPLOAD ERROR: Failed to record range in DB: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed_to_record_range"})
+		return
 	}
-	serverPercent := int((float64(actualReceived) / float64(totalChunks)) * 100)
-	tgclient.UpdateTaskWithFile(taskID, "uploading_to_server", serverPercent, "pushing_to_server", "", username, totalSize, uploadedBytes)
 
-	// uploadStarted guards against double-trigger
-	isDone := actualReceived == totalChunks && !state.uploadStarted
+	// For legacy chunk uploads, also record the index
+	if !isRangeUpload {
+		chunkIndex, _ := strconv.Atoi(c.PostForm("chunk_index"))
+		database.DB.Exec(database.InsertIgnoreSQL("upload_chunks", "task_id, chunk_index", "?, ?"), taskID, chunkIndex)
+	}
+
+	// Retrieve range state tracker
+	val, loaded := rangeTrackerSync.LoadOrStore(taskID, &rangeState{
+		ranges: []database.Range{},
+	})
+	state := val.(*rangeState)
+
+	state.Lock()
+	if !loaded {
+		var dbRanges []database.Range
+		err := database.RODB.Select(&dbRanges, "SELECT start_byte, end_byte FROM upload_ranges WHERE task_id = ?", taskID)
+		if err == nil {
+			state.ranges = dbRanges
+		}
+	}
+
+	// Add current range and normalize
+	state.ranges = append(state.ranges, database.Range{StartByte: startByte, EndByte: endByte})
+	state.ranges = database.NormalizeRanges(state.ranges)
+
+	var uniqueUploaded int64
+	for _, r := range state.ranges {
+		uniqueUploaded += r.EndByte - r.StartByte
+	}
+	if uniqueUploaded > totalSize {
+		uniqueUploaded = totalSize
+	}
+
+	serverPercent := int((float64(uniqueUploaded) / float64(totalSize)) * 100)
+	tgclient.UpdateTaskWithFile(taskID, "uploading_to_server", serverPercent, "pushing_to_server", "", username, totalSize, uniqueUploaded)
+
+	isDone := uniqueUploaded == totalSize && !state.uploadStarted
 	if isDone {
 		state.uploadStarted = true
-		chunkTrackerSync.Delete(taskID)
-		database.DB.Exec("DELETE FROM upload_chunks WHERE task_id = ?", taskID)
-		database.DB.Exec("DELETE FROM upload_tasks WHERE id = ?", taskID)
 	}
 	state.Unlock()
 
 	if isDone {
+		res, err := database.DB.Exec("UPDATE upload_tasks SET status = 'processing' WHERE id = ? AND status = 'uploading'", taskID)
+		if err != nil || res == nil {
+			isDone = false
+		} else {
+			rows, _ := res.RowsAffected()
+			if rows == 0 {
+				isDone = false
+			}
+		}
+	}
+
+	if isDone {
+		rangeTrackerSync.Delete(taskID)
+		chunkTrackerSync.Delete(taskID)
+		database.DB.Exec("DELETE FROM upload_ranges WHERE task_id = ?", taskID)
+		database.DB.Exec("DELETE FROM upload_chunks WHERE task_id = ?", taskID)
+		database.DB.Exec("DELETE FROM upload_tasks WHERE id = ?", taskID)
+
 		tgclient.UpdateTask(taskID, "uploading_to_server", 100, "", username)
 
 		mimeType := header.Header.Get("Content-Type")
-		// Browsers often send wrong or generic MIME types; fallback using extension.
 		if mimeType == "" || mimeType == "application/octet-stream" {
 			if ext := filepath.Ext(filename); ext != "" {
 				if detected := mime.TypeByExtension(ext); detected != "" {
@@ -417,7 +468,6 @@ func (h *Handler) handlePostUpload(c *gin.Context) {
 			mimeType = "application/octet-stream"
 		}
 
-		// Capture overwriteFlag from this request directly.
 		ov := overwriteFlag
 		go func() {
 			defer os.Remove(tempFilePath)
@@ -428,7 +478,7 @@ func (h *Handler) handlePostUpload(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "chunk_received", "chunk": chunkIndex})
+	c.JSON(http.StatusOK, gin.H{"status": "range_received", "start_byte": startByte, "end_byte": endByte})
 }
 
 func (h *Handler) handlePostRemoteUpload(c *gin.Context) {
@@ -588,7 +638,9 @@ func (h *Handler) handleCancelUpload(c *gin.Context) {
 		}
 
 		chunkTrackerSync.Delete(taskID)
+		rangeTrackerSync.Delete(taskID)
 		database.DB.Exec("DELETE FROM upload_chunks WHERE task_id = ?", taskID)
+		database.DB.Exec("DELETE FROM upload_ranges WHERE task_id = ?", taskID)
 		database.DB.Exec("DELETE FROM upload_tasks WHERE id = ?", taskID)
 	}
 
@@ -1160,13 +1212,20 @@ func (h *Handler) handleGetUploadCheck(c *gin.Context) {
 	}
 	err := database.RODB.Get(&task, "SELECT id FROM upload_tasks WHERE id = ? AND owner = ?", taskID, username)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"chunks": []int{}})
+		c.JSON(http.StatusOK, gin.H{"chunks": []int{}, "ranges": []database.Range{}})
 		return
 	}
 
 	var chunks []int
 	database.RODB.Select(&chunks, "SELECT chunk_index FROM upload_chunks WHERE task_id = ? ORDER BY chunk_index ASC", taskID)
-	c.JSON(http.StatusOK, gin.H{"chunks": chunks})
+
+	var ranges []database.Range
+	database.RODB.Select(&ranges, "SELECT start_byte, end_byte FROM upload_ranges WHERE task_id = ? ORDER BY start_byte ASC", taskID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"chunks": chunks,
+		"ranges": ranges,
+	})
 }
 
 func (h *Handler) handlePostCheckExists(c *gin.Context) {

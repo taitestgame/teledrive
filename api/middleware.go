@@ -24,8 +24,15 @@ type chunkState struct {
 	uploadStarted bool // guards against double-trigger in concurrent chunk finalization
 }
 
+type rangeState struct {
+	sync.Mutex
+	ranges        []database.Range
+	uploadStarted bool
+}
+
 var (
 	chunkTrackerSync sync.Map // map[string]*chunkState
+	rangeTrackerSync sync.Map // map[string]*rangeState
 	loginAttempts    sync.Map
 )
 

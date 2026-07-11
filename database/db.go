@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -310,6 +311,8 @@ const sqliteSchema = `
 		filename TEXT NOT NULL,
 		owner TEXT NOT NULL,
 		overwrite BOOLEAN DEFAULT 0,
+		total_size INTEGER DEFAULT 0,
+		status TEXT DEFAULT 'uploading',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
@@ -318,6 +321,14 @@ const sqliteSchema = `
 		chunk_index INTEGER NOT NULL,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (task_id, chunk_index)
+	);
+
+	CREATE TABLE IF NOT EXISTS upload_ranges (
+		task_id TEXT NOT NULL,
+		start_byte INTEGER NOT NULL,
+		end_byte INTEGER NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (task_id, start_byte, end_byte)
 	);
 
 	CREATE TABLE IF NOT EXISTS user_settings (
@@ -437,6 +448,8 @@ const mysqlSchema = `
 		filename VARCHAR(191) NOT NULL,
 		owner VARCHAR(191) NOT NULL,
 		overwrite TINYINT(1) DEFAULT 0,
+		total_size BIGINT DEFAULT 0,
+		status VARCHAR(50) DEFAULT 'uploading',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -445,6 +458,14 @@ const mysqlSchema = `
 		chunk_index BIGINT NOT NULL,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (task_id, chunk_index)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+	CREATE TABLE IF NOT EXISTS upload_ranges (
+		task_id VARCHAR(191) NOT NULL,
+		start_byte BIGINT NOT NULL,
+		end_byte BIGINT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (task_id, start_byte, end_byte)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 	CREATE TABLE IF NOT EXISTS user_settings (
@@ -555,6 +576,8 @@ const postgresSchema = `
 		filename TEXT NOT NULL,
 		owner TEXT NOT NULL,
 		overwrite BOOLEAN DEFAULT FALSE,
+		total_size BIGINT DEFAULT 0,
+		status TEXT DEFAULT 'uploading',
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 
@@ -563,6 +586,14 @@ const postgresSchema = `
 		chunk_index BIGINT NOT NULL,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (task_id, chunk_index)
+	);
+
+	CREATE TABLE IF NOT EXISTS upload_ranges (
+		task_id TEXT NOT NULL,
+		start_byte BIGINT NOT NULL,
+		end_byte BIGINT NOT NULL,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (task_id, start_byte, end_byte)
 	);
 
 	CREATE TABLE IF NOT EXISTS user_settings (
@@ -631,6 +662,9 @@ func migrateSQLite() error {
 	DB.Exec("CREATE TABLE IF NOT EXISTS share_sessions (token TEXT PRIMARY KEY, share_token TEXT NOT NULL, expires_at DATETIME NOT NULL)")
 	DB.Exec("CREATE INDEX IF NOT EXISTS idx_share_sessions_share ON share_sessions(share_token)")
 	DB.Exec("CREATE INDEX IF NOT EXISTS idx_share_sessions_expires ON share_sessions(expires_at)")
+	DB.Exec("ALTER TABLE upload_tasks ADD COLUMN total_size INTEGER DEFAULT 0")
+	DB.Exec("ALTER TABLE upload_tasks ADD COLUMN status TEXT DEFAULT 'uploading'")
+	DB.Exec("CREATE TABLE IF NOT EXISTS upload_ranges (task_id TEXT NOT NULL, start_byte INTEGER NOT NULL, end_byte INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (task_id, start_byte, end_byte))")
 	// Ensure foreign keys are enabled
 	DB.Exec("PRAGMA foreign_keys = ON")
 	return nil
@@ -761,6 +795,9 @@ func migrateMySQL() error {
 	if _, err := DB.Exec("CREATE TABLE IF NOT EXISTS user_settings (username VARCHAR(191) NOT NULL, `key` VARCHAR(191) NOT NULL, value TEXT NOT NULL, PRIMARY KEY (username, `key`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"); err != nil {
 		return err
 	}
+	alterTableMySQL("upload_tasks", "ADD COLUMN total_size BIGINT DEFAULT 0")
+	alterTableMySQL("upload_tasks", "ADD COLUMN status VARCHAR(50) DEFAULT 'uploading'")
+	DB.Exec("CREATE TABLE IF NOT EXISTS upload_ranges (task_id VARCHAR(191) NOT NULL, start_byte BIGINT NOT NULL, end_byte BIGINT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (task_id, start_byte, end_byte)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci")
 
 	return nil
 }
@@ -783,6 +820,9 @@ func migratePostgres() error {
 		ON files (path, filename, owner)
 		WHERE deleted_at IS NULL
 	`)
+	DB.Exec("ALTER TABLE upload_tasks ADD COLUMN IF NOT EXISTS total_size BIGINT DEFAULT 0")
+	DB.Exec("ALTER TABLE upload_tasks ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'uploading'")
+	DB.Exec("CREATE TABLE IF NOT EXISTS upload_ranges (task_id TEXT NOT NULL, start_byte BIGINT NOT NULL, end_byte BIGINT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (task_id, start_byte, end_byte))")
 	return err
 }
 
@@ -1242,4 +1282,41 @@ func GetOrphanedMessages(fileIDs []int) ([]int, error) {
 	var orphanedIDs []int
 	err := RODB.Select(&orphanedIDs, query, fullArgs...)
 	return orphanedIDs, err
+}
+
+type Range struct {
+	StartByte int64 `db:"start_byte" json:"start_byte"`
+	EndByte   int64 `db:"end_byte" json:"end_byte"`
+}
+
+// NormalizeRanges sorts and merges overlapping/adjacent ranges.
+func NormalizeRanges(ranges []Range) []Range {
+	if len(ranges) <= 1 {
+		return ranges
+	}
+
+	// Sort by StartByte
+	sort.Slice(ranges, func(i, j int) bool {
+		return ranges[i].StartByte < ranges[j].StartByte
+	})
+
+	var normalized []Range
+	current := ranges[0]
+
+	for i := 1; i < len(ranges); i++ {
+		next := ranges[i]
+		if next.StartByte <= current.EndByte {
+			// Overlapping or adjacent, merge them
+			if next.EndByte > current.EndByte {
+				current.EndByte = next.EndByte
+			}
+		} else {
+			// Gap found, push current and start new range
+			normalized = append(normalized, current)
+			current = next
+		}
+	}
+	normalized = append(normalized, current)
+
+	return normalized
 }
