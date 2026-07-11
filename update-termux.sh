@@ -23,20 +23,25 @@ fi
 # 2. Biên dịch mã nguồn trên điện thoại
 echo "-> Đang biên dịch mã nguồn trực tiếp trên điện thoại..."
 # Cài đặt golang trên Termux nếu chưa có: pkg install golang -y
-go build -o telecloud-arm64 main.go
+go build -o telecloud main.go
 if [ $? -ne 0 ]; then
     echo "❌ Lỗi: Biên dịch thất bại."
     echo "👉 Hãy đảm bảo bạn đã cài đặt Go trên Termux bằng cách chạy lệnh: pkg install golang -y"
     exit 1
 fi
-chmod +x ./telecloud-arm64
+chmod +x ./telecloud
 echo "   [OK] Biên dịch thành công."
 
-# 3. Khởi động lại server và tunnel
-echo "-> Đang khởi động lại các dịch vụ..."
-killall telecloud-arm64 cloudflared 2>/dev/null
-
-sleep 1
-
-# Chạy lại tất cả
-bash run-termux.sh
+# 3. Dọn dẹp tiến trình cũ và thông báo
+killall telecloud-arm64 telecloud cloudflared 2>/dev/null || true
+echo "============================================="
+echo "✅ BIÊN DỊCH VÀ CẬP NHẬT THÀNH CÔNG!"
+echo "============================================="
+echo "👉 Phiên bản đã được cập nhật thành công thành tệp 'telecloud'."
+echo "👉 Bây giờ bạn có thể dùng MENU QUẢN LÝ để điều khiển."
+echo "👉 Hãy chạy lệnh sau để mở TELECLOUD MANAGER MENU:"
+echo "   bash auto-setup.sh"
+echo "   Và chọn:"
+echo "   - Mục 2: Khởi động ứng dụng"
+echo "   - Hoặc Mục 4: Khởi động lại ứng dụng"
+echo "============================================="
