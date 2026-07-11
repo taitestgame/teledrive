@@ -3334,10 +3334,27 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
 
                                 xhr.open('POST', '/api/upload');
                                 xhr.setRequestHeader('X-CSRF-Token', TeleCloud.getCsrfToken());
-                                xhr.timeout = 90000; // Timeout after 90 seconds of no progress to prevent frozen uploads
+                                xhr.timeout = 180000; // Large overall timeout to allow slow connections
                                 
+                                let lastProgressTime = Date.now();
+                                const watchdog = setInterval(() => {
+                                    const t = this.uploadQueue.find(q => q.id === taskId);
+                                    if (!t || t.isCancelled) {
+                                        clearInterval(watchdog);
+                                        return;
+                                    }
+                                    // If no progress event is received for 10 seconds, abort and trigger immediate retry
+                                    if (Date.now() - lastProgressTime > 10000) {
+                                        clearInterval(watchdog);
+                                        xhr.abort();
+                                    }
+                                }, 2000);
+
+                                const cleanupWatchdog = () => clearInterval(watchdog);
+
                                 xhr.upload.onprogress = (e) => {
                                     if (e.lengthComputable) {
+                                        lastProgressTime = Date.now(); // Reset progress timer on any active upload progress
                                         const now = Date.now();
                                         const task = this.uploadQueue.find(t => t.id === taskId);
                                         if (task && task._progressMap) {
@@ -3373,6 +3390,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                                     }
                                 };
                                 xhr.onload = () => {
+                                    cleanupWatchdog();
                                     const task = this.uploadQueue.find(t => t.id === taskId);
                                     if (task && task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
                                     
@@ -3392,6 +3410,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                                     }
                                 };
                                 xhr.onerror = () => {
+                                    cleanupWatchdog();
                                     const task = this.uploadQueue.find(t => t.id === taskId);
                                     if (task) {
                                         if (task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
@@ -3399,6 +3418,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                                     reject(new Error(this.t('conn_error')));
                                 };
                                 xhr.ontimeout = () => {
+                                    cleanupWatchdog();
                                     const task = this.uploadQueue.find(t => t.id === taskId);
                                     if (task) {
                                         if (task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
@@ -3406,6 +3426,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                                     reject(new Error(this.t('conn_error') + ' (Timeout)'));
                                 };
                                 xhr.onabort = () => {
+                                    cleanupWatchdog();
                                     const task = this.uploadQueue.find(t => t.id === taskId);
                                     if (task) {
                                         if (task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
