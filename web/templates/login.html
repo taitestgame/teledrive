@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>TeleCloud - Login</title>
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+    <link rel="shortcut icon" href="/static/favicon.ico" type="image/x-icon">
+
+    <link rel="stylesheet" href="/static/css/tailwind.css?v={{ .version }}">
+    <link rel="stylesheet" href="/static/css/style.min.css?v={{ .version }}">
+
+    <script>window.TELECLOUD_VERSION = '{{ .version }}';</script>
+    <script src="/static/js/common.min.js?v={{ .version }}"></script>
+    <script>TeleCloud.version = '{{ .version }}';</script>
+    <script type="module" src="/static/js/script.min.js?v={{ .version }}"></script>
+
+
+    <!-- SEO & Social Meta Tags -->
+    <meta name="description" content="TeleCloud OS - Cloud file management via Telegram">
+    <meta property="og:title" content="TeleCloud OS">
+    <meta property="og:description"
+        content="Personal cloud storage system using Telegram API. Secure, high-speed and unlimited.">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="/static/favicon.ico">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="TeleCloud OS">
+    <meta name="twitter:description" content="Personal cloud storage system using Telegram API.">
+</head>
+
+<body
+    class="bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 h-full relative overflow-hidden flex flex-col transition-colors duration-500"
+    data-theme="system"
+    x-data="cloudApp(false, 'system', 0, 0, false)">
+    <div class="blob-1"></div>
+    <div class="blob-2"></div>
+
+    <div x-show="toastModal.show" x-cloak
+        class="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
+        x-transition.opacity>
+        <div @click.outside="if(!toastModal.persistent) toastModal.show = false"
+            class="glass-menu w-full max-w-sm rounded-[2rem] p-6 shadow-2xl animate-modal-in border border-white/20 relative flex flex-col items-center text-center">
+
+            <div class="w-16 h-16 rounded-full flex items-center justify-center mb-4 shadow-inner"
+                :class="toastModal.type === 'error' ? 'bg-red-100 text-red-500 dark:bg-red-500/20' : 'bg-emerald-100 text-emerald-500 dark:bg-emerald-500/20'">
+                <i class="fa-solid text-3xl" :class="toastModal.type === 'error' ? 'fa-xmark' : 'fa-check'"></i>
+            </div>
+
+            <h3 class="text-xl font-bold text-slate-900 dark:text-white mb-2"
+                x-text="toastModal.type === 'error' ? t('failure') : t('success')"></h3>
+            <p class="text-slate-600 dark:text-slate-300 text-sm mb-2" x-text="toastModal.message"></p>
+
+            <button x-show="!toastModal.persistent" @click="toastModal.show = false"
+                class="mt-4 w-full py-3 rounded-xl text-white font-medium shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-1.5"
+                :class="toastModal.type === 'error' ? 'bg-red-600 hover:bg-red-500 shadow-red-500/25' : 'bg-blue-600 hover:bg-blue-500 shadow-blue-500/25'">
+                <i class="fa-solid fa-xmark"></i>
+                <span x-text="t('close')"></span>
+            </button>
+        </div>
+    </div>
+
+    <div x-show="modal.show" x-cloak
+        class="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm"
+        x-transition.opacity>
+        <div @click.outside="if(modal.type==='alert') closeUIModal(null)"
+            class="glass-menu w-[90%] max-w-sm rounded-[2rem] p-6 shadow-2xl animate-modal-in border border-white/20">
+            <h3 class="text-xl font-bold mb-2 text-slate-900 dark:text-white" x-text="modal.title"></h3>
+            <p class="text-slate-600 dark:text-slate-300 text-sm mb-5" x-html="modal.message" x-show="modal.message">
+            </p>
+            <template x-if="modal.type === 'prompt'">
+                <input :type="modal.inputType || 'text'" x-model="modal.input" x-ref="modalInput" @keydown.enter="closeUIModal(modal.input)"
+                    class="w-full p-3 rounded-xl bg-white/50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white mb-5 transition-all">
+            </template>
+
+            <div class="flex justify-end gap-3 mt-2" x-show="modal.type !== 'alert'">
+                <button @click="closeUIModal(null)"
+                    class="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 font-medium transition-colors flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-xmark"></i>
+                    <span x-text="t('cancel')"></span>
+                </button>
+                <button @click="closeUIModal(modal.type === 'prompt' ? modal.input : true)"
+                    class="px-5 py-2 rounded-xl text-white font-medium shadow-lg transition-transform active:scale-95 bg-blue-600 hover:bg-blue-500 shadow-blue-500/25 flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-check"></i>
+                    <span x-text="t('confirm')"></span>
+                </button>
+            </div>
+            <div class="flex justify-end gap-3 mt-2" x-show="modal.type === 'alert'">
+                <button @click="closeUIModal(true)"
+                    class="px-5 py-2 rounded-xl text-white font-medium shadow-lg transition-transform active:scale-95 bg-blue-600 hover:bg-blue-500 shadow-blue-500/25 flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-xmark"></i>
+                    <span x-text="t('close')"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Force Password Change Modal (First Login) -->
+    <div x-show="forceChangeModal.show" x-cloak
+        class="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
+        x-transition.opacity>
+        <div @click.outside="if(!forceChangeModal.persistent) { forceChangeModal.show = false; if(forceChangeModal.resolve) forceChangeModal.resolve(false); }"
+            class="glass-menu w-[90%] max-w-sm rounded-[2rem] p-6 shadow-2xl animate-modal-in border border-white/20 relative">
+            
+            <div class="w-16 h-16 rounded-full bg-amber-100 dark:bg-amber-500/20 text-amber-500 flex items-center justify-center mx-auto mb-4 shadow-inner">
+                <i class="fa-solid fa-shield-halved text-3xl"></i>
+            </div>
+            
+            <h3 class="text-xl font-bold text-slate-900 dark:text-white text-center mb-2" x-text="t('force_password_change_title')"></h3>
+            <p class="text-slate-500 dark:text-slate-400 text-xs text-center mb-6" x-text="t('force_password_change_msg')"></p>
+            
+            <form @submit.prevent="submitFirstTimePasswordChange" class="space-y-4">
+                <!-- New Password Field -->
+                <div>
+                    <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5 block" x-text="t('new_password')"></label>
+                    <div class="flex items-center justify-between p-3.5 bg-white/50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/50 rounded-xl relative focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent transition-all">
+                        <input :type="forceChangeModal.showNewPassword ? 'text' : 'password'" 
+                               x-model="forceChangeModal.newPassword"
+                               required
+                               :placeholder="t('enter_new_password') || 'Enter new password'"
+                               class="bg-transparent border-none p-0 focus:ring-0 focus:outline-none text-sm text-slate-900 dark:text-white w-[calc(100%-35px)]">
+                        <button type="button" @click="forceChangeModal.showNewPassword = !forceChangeModal.showNewPassword" class="text-slate-400 hover:text-blue-500 p-1 transition-colors">
+                            <i class="fa-regular" :class="forceChangeModal.showNewPassword ? 'fa-eye-slash' : 'fa-eye'"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Confirm Password Field -->
+                <div>
+                    <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5 block" x-text="t('confirm_password')"></label>
+                    <div class="flex items-center justify-between p-3.5 bg-white/50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/50 rounded-xl relative focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent transition-all">
+                        <input :type="forceChangeModal.showConfirmPassword ? 'text' : 'password'" 
+                               x-model="forceChangeModal.confirmPassword"
+                               required
+                               :placeholder="t('confirm_password')"
+                               class="bg-transparent border-none p-0 focus:ring-0 focus:outline-none text-sm text-slate-900 dark:text-white w-[calc(100%-35px)]">
+                        <button type="button" @click="forceChangeModal.showConfirmPassword = !forceChangeModal.showConfirmPassword" class="text-slate-400 hover:text-blue-500 p-1 transition-colors">
+                            <i class="fa-regular" :class="forceChangeModal.showConfirmPassword ? 'fa-eye-slash' : 'fa-eye'"></i>
+                        </button>
+                    </div>
+                </div>
+ 
+                <!-- Error Badge -->
+                <div x-show="forceChangeModal.error" x-cloak
+                    class="p-3 rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 text-red-600 dark:text-red-400 text-xs font-semibold flex items-center gap-2 animate-shake">
+                    <i class="fa-solid fa-circle-exclamation"></i>
+                    <span x-text="forceChangeModal.error"></span>
+                </div>
+                
+                <!-- Actions -->
+                <div class="flex gap-3 pt-2">
+                    <button type="button" @click="forceChangeModal.show = false; if(forceChangeModal.resolve) forceChangeModal.resolve(false);" 
+                        class="flex-1 py-3 px-4 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold transition-all text-sm border border-transparent flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-xmark"></i>
+                        <span x-text="t('cancel')"></span>
+                    </button>
+                    <button type="submit" 
+                        class="flex-1 py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-lg shadow-blue-500/25 transition-all text-sm flex items-center justify-center gap-1.5"
+                        :disabled="forceChangeModal.loading">
+                        <i class="fa-solid fa-spinner fa-spin" x-show="forceChangeModal.loading"></i>
+                        <i class="fa-solid fa-check" x-show="!forceChangeModal.loading"></i>
+                        <span x-text="t('confirm')"></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+
+    <div class="w-full h-[100dvh] flex flex-col items-center justify-center p-4 z-10">
+        <div class="glass-panel p-8 md:p-10 rounded-[2rem] w-full max-w-md relative">
+            <!-- Language Dropdown -->
+            <div class="absolute top-4 right-4 z-[110]" x-data="{ open: false }">
+                <button @click="open = !open" @click.outside="open = false"
+                    class="h-8 px-2 flex items-center gap-1.5 text-slate-500 hover:text-blue-500 bg-white/50 dark:bg-slate-800/50 rounded-lg transition-colors border border-slate-200 dark:border-slate-700/50">
+                    <i class="fa-solid fa-earth-americas text-xs"></i>
+                    <span class="text-[10px] font-bold uppercase" x-text="lang"></span>
+                </button>
+                <div x-show="open" x-cloak
+                    class="absolute top-10 right-0 w-32 glass-menu rounded-xl shadow-xl border border-white/20 p-1 z-[1000]"
+                    x-transition:enter="transition ease-out duration-100"
+                    x-transition:enter-start="transform opacity-0 scale-95"
+                    x-transition:enter-end="transform opacity-100 scale-100">
+                    <template x-for="l in TeleCloud.availableLangs" :key="l.code">
+                        <button @click="setLang(l.code); open = false"
+                            class="w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-between"
+                            :class="lang === l.code ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'">
+                            <span x-text="l.name"></span>
+                            <span x-text="l.flag"></span>
+                        </button>
+                    </template>
+                </div>
+            </div>
+            <div class="text-center mb-8">
+                <div
+                    class="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl mx-auto flex items-center justify-center shadow-lg shadow-blue-500/30 mb-4">
+                    <i class="fa-solid fa-cloud text-3xl text-white"></i>
+                </div>
+                <h2 class="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">TeleCloud OS</h2>
+            </div>
+            <form @submit.prevent="login">
+                <input type="text" autocomplete="username" x-model="username"
+                    :placeholder="t('username')" required
+                    class="w-full p-4 rounded-xl bg-white/50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/50 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white mb-4 backdrop-blur-sm transition-all">
+                <input type="password" autocomplete="current-password" x-model="password"
+                    :placeholder="t('password')" required
+                    class="w-full p-4 rounded-xl bg-white/50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/50 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white mb-6 backdrop-blur-sm transition-all">
+                <button type="submit"
+                    class="w-full py-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-all shadow-lg active:scale-[0.98] flex justify-center items-center gap-2"
+                    :disabled="isLoggingIn">
+                    <i class="fa-solid fa-spinner fa-spin" x-show="isLoggingIn" x-cloak></i>
+                    <span x-text="t('access_system')"></span>
+                </button>
+
+                <div class="mt-4 flex flex-col gap-3">
+                    <div class="relative flex items-center justify-center">
+                        <div class="absolute inset-0 flex items-center">
+                            <div class="w-full border-t border-slate-200 dark:border-slate-800"></div>
+                        </div>
+                        <span class="relative px-3 bg-white/20 dark:bg-slate-900/20 backdrop-blur-md text-[10px] font-bold uppercase tracking-widest text-slate-500" x-text="t('or_continue_with')"></span>
+                    </div>
+
+                    <button type="button" @click="loginWithPasskey" :disabled="isPasskeyLoading"
+                        class="w-full py-4 rounded-xl bg-white/50 dark:bg-slate-800/50 hover:bg-white/80 dark:hover:bg-slate-700/80 text-slate-700 dark:text-white font-semibold transition-all shadow-md active:scale-[0.98] flex justify-center items-center gap-3 border border-slate-200 dark:border-slate-700/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 disabled:pointer-events-none">
+                        <i class="fa-solid fa-spinner fa-spin text-xl text-blue-500" x-show="isPasskeyLoading" x-cloak></i>
+                        <i class="fa-solid fa-fingerprint text-xl text-blue-500" x-show="!isPasskeyLoading"></i>
+                        <span x-text="isPasskeyLoading ? t('loading') : t('login_passkey')">Login with Passkey</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Use the passkey methods already defined in script.js
+    </script>
+</body>
+
+</html>

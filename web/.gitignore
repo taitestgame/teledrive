@@ -1,0 +1,15 @@
+# Binaries
+tailwindcss
+*.exe
+*.bin
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+bun.lock

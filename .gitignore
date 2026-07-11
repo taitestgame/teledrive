@@ -43,16 +43,7 @@ vendor/
 
 # Tailwind & Frontend
 tailwindcss
-static/css/tailwind.css
-static/css/plyr.css
-static/js/plyr.polyfilled.js
-static/js/alpine.min.js
-static/js/alpine-collapse.min.js
-static/css/prism.css
-static/js/prism.js
 node_modules/
-static/js/*.min.js
-static/css/*.min.css
 
 # Build test folder
 build/*
