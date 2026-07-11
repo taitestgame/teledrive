@@ -3334,6 +3334,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
 
                                 xhr.open('POST', '/api/upload');
                                 xhr.setRequestHeader('X-CSRF-Token', TeleCloud.getCsrfToken());
+                                xhr.timeout = 90000; // Timeout after 90 seconds of no progress to prevent frozen uploads
                                 
                                 xhr.upload.onprogress = (e) => {
                                     if (e.lengthComputable) {
@@ -3396,6 +3397,13 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                                         if (task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
                                     }
                                     reject(new Error(this.t('conn_error')));
+                                };
+                                xhr.ontimeout = () => {
+                                    const task = this.uploadQueue.find(t => t.id === taskId);
+                                    if (task) {
+                                        if (task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
+                                    }
+                                    reject(new Error(this.t('conn_error') + ' (Timeout)'));
                                 };
                                 xhr.onabort = () => {
                                     const task = this.uploadQueue.find(t => t.id === taskId);
