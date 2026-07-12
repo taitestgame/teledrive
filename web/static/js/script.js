@@ -3247,7 +3247,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
             const MIN_CONCURRENCY = 1;
             const MAX_CONCURRENCY = 3;
             const WATCHDOG_INTERVAL = 250;
-            const STALL_TIMEOUT = 2000;
+            const STALL_TIMEOUT = 8000;
             const TARGET_REQUEST_TIME = 20000;
             const PREDICTIVE_SPLIT_LIMIT = 60000;
             const CLIENT_HARD_LIMIT = 75000;
