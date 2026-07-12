@@ -3644,10 +3644,10 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 };
 
                 xhr.onload = () => {
-                    worker.reset();
                     if (task && task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
 
                     if (xhr.status >= 200 && xhr.status < 300) {
+                        worker.reset();
                         task.confirmedRanges.push(range);
                         task.confirmedRanges = normalizeRanges(task.confirmedRanges);
 
@@ -3684,13 +3684,11 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 };
 
                 xhr.onerror = () => {
-                    worker.reset();
                     if (task && task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
                     handleWorkerFailure(worker, "Network Error");
                 };
 
                 xhr.onabort = () => {
-                    worker.reset();
                     if (task && task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
                     if (!worker.recoveryStarted) {
                         handleWorkerFailure(worker, "Aborted");
