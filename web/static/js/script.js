@@ -3621,6 +3621,17 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
 
             const scheduleNext = () => {
                 const currentTask = this.uploadQueue.find(t => t.id === taskId);
+                logDiag('SCHEDULE_NEXT_CALL', {
+                    taskId,
+                    hasCurrentTask: !!currentTask,
+                    isCancelled: currentTask ? currentTask.isCancelled : false,
+                    hasError: task.hasError,
+                    inFlightCount: task.inFlightRanges.length,
+                    concurrency: task.currentConcurrency,
+                    pendingCount: task.pendingRanges.length,
+                    deferredCount: task.deferredRanges.length,
+                    chunkSize: task.currentAdaptiveChunkSize
+                });
                 if (!currentTask || currentTask.isCancelled) {
                     schedulerResolve();
                     return;
