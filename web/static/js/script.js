@@ -1,4 +1,4 @@
-﻿// Silence Artplayer's persistent console logs
+// Silence Artplayer's persistent console logs
 (function() {
     const originalLog = console.log;
     console.log = function(...args) {
@@ -3352,6 +3352,8 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                     this.ewmaThroughput = 0;
                     this.stableSuccessCount = 0;
                     this.retryCount = 0;
+                    this.stallCeiling = MAX_CHUNK_SIZE; // Adaptive ceiling - lowered on stall
+                    this.ceilingSuccessCount = 0; // Successes at ceiling, used to probe higher
 
                     this.activeRange = null;
                     this.xhr = null;
@@ -3559,7 +3561,13 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
 
                 // Shrink this worker's chunk size only
                 worker.stableSuccessCount = 0;
+                worker.ceilingSuccessCount = 0;
                 const prevSize = worker.currentChunkSize;
+                // Set stall ceiling so we don't grow back to the size that stalled
+                if (reason === 'STALL' || reason === 'PREDICTIVE_TIMEOUT' || reason === 'HARD_LIMIT' || reason === 'STARTING_TIMEOUT') {
+                    worker.stallCeiling = Math.max(MIN_CHUNK_SIZE, Math.floor(prevSize * 0.75));
+                    logDiag('STALL_CEILING_SET', { workerId: worker.id, ceiling: worker.stallCeiling, stalledAt: prevSize });
+                }
                 worker.currentChunkSize = Math.max(MIN_CHUNK_SIZE, Math.floor(worker.currentChunkSize / 2));
                 logDiag('WORKER_SHRINK', { workerId: worker.id, prevSize, newSize: worker.currentChunkSize, reason });
 
@@ -3689,11 +3697,22 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                             } else {
                                 nextSize = worker.currentChunkSize * 1.5;
                             }
-                            // Cap growth at 2x current to prevent jumping too large
+                            // Cap growth at 2x current AND stall ceiling
                             nextSize = Math.min(nextSize, worker.currentChunkSize * MAX_GROWTH_FACTOR);
+                            nextSize = Math.min(nextSize, worker.stallCeiling);
                             worker.currentChunkSize = Math.floor(Math.max(MIN_CHUNK_SIZE, Math.min(MAX_CHUNK_SIZE, nextSize)));
                             worker.stableSuccessCount = 0;
-                            logDiag('WORKER_CHUNK_GROW', { workerId: worker.id, chunkSize: worker.currentChunkSize });
+                            logDiag('WORKER_CHUNK_GROW', { workerId: worker.id, chunkSize: worker.currentChunkSize, ceiling: worker.stallCeiling });
+                        }
+
+                        // After many successes at the ceiling, slowly probe higher
+                        if (worker.currentChunkSize >= worker.stallCeiling * 0.9 && worker.stallCeiling < MAX_CHUNK_SIZE) {
+                            worker.ceilingSuccessCount++;
+                            if (worker.ceilingSuccessCount >= 10) {
+                                worker.stallCeiling = Math.min(MAX_CHUNK_SIZE, Math.floor(worker.stallCeiling * 1.25));
+                                worker.ceilingSuccessCount = 0;
+                                logDiag('STALL_CEILING_RAISE', { workerId: worker.id, newCeiling: worker.stallCeiling });
+                            }
                         }
 
                         logDiag('UPLOAD_SUCCESS', { range, workerId: worker.id });
