@@ -3240,19 +3240,19 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
 
         async uploadSingleFile(file, taskId, targetPath, overwrite = false) {
             // CENTRALIZED CONSTANTS
-            const INITIAL_CHUNK_SIZE = 5 * 1024 * 1024;
+            const INITIAL_CHUNK_SIZE = 2 * 1024 * 1024;     // Bắt đầu 2MB thay vì 5MB - phù hợp với mạng yếu
             const MIN_CHUNK_SIZE = 512 * 1024;
             const MAX_CHUNK_SIZE = 50 * 1024 * 1024;
-            const INITIAL_CONCURRENCY = 3;
+            const INITIAL_CONCURRENCY = 1;                   // Bắt đầu 1 luồng - tránh bão hoà mạng yếu
             const MIN_CONCURRENCY = 1;
             const MAX_CONCURRENCY = 3;
-            const WATCHDOG_INTERVAL = 250;
-            const STALL_TIMEOUT = 8000;
-            const TARGET_REQUEST_TIME = 20000;
-            const PREDICTIVE_SPLIT_LIMIT = 60000;
-            const CLIENT_HARD_LIMIT = 75000;
-            const MIN_STABLE_SAMPLES_FOR_GROWTH = 2;
-            const STARTING_TIMEOUT = 10000; // Time allowed in STARTING state before first progress event (10s)
+            const WATCHDOG_INTERVAL = 500;                   // Giảm tần số kiểm tra để nhẹ tải CPU
+            const STALL_TIMEOUT = 25000;                     // 25 giây - phù hợp với mạng chậm + Cloudflare latency
+            const TARGET_REQUEST_TIME = 30000;               // Nhắm mỗi mảnh xong trong 30 giây
+            const PREDICTIVE_SPLIT_LIMIT = 90000;            // Cảnh báo sớm nếu dự báo vượt 90 giây
+            const CLIENT_HARD_LIMIT = 100000;                // Giới hạn cứng 100 giây
+            const MIN_STABLE_SAMPLES_FOR_GROWTH = 3;         // Cần 3 lần thành công liên tiếp mới tăng
+            const STARTING_TIMEOUT = 15000;                  // 15 giây để thiết lập kết nối qua Cloudflare
 
             // RANGE HELPER FUNCTIONS
             const normalizeRanges = (ranges) => {
@@ -3587,20 +3587,23 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 if (missingGaps.length > 0) {
                     for (const gap of missingGaps) {
                         const gapSize = gap.end_byte - gap.start_byte;
-                        if (gapSize <= MIN_CHUNK_SIZE) {
-                            // Retry minimum range with retry count
+                        // FIX: Chỉ split nếu mảnh còn lớn hơn 4x kích thước tối thiểu.
+                        // Nếu mảnh đã nhỏ thì RETRY TRỰC TIẾP thay vì chia đôi liên tục.
+                        const SPLIT_THRESHOLD = 4 * MIN_CHUNK_SIZE; // 2MB
+                        if (gapSize <= SPLIT_THRESHOLD) {
+                            // Retry trực tiếp mảnh nhỏ - không chia thêm
                             inFlightRecord.retryCount++;
-                            if (inFlightRecord.retryCount > 5) {
+                            if (inFlightRecord.retryCount > 8) {
                                 logDiag('DEFER_RANGE', { gap });
                                 task.deferredRanges.push(gap);
                             } else {
-                                logDiag('RETRY_MIN_RANGE', { gap, retry: inFlightRecord.retryCount });
+                                logDiag('RETRY_SMALL_RANGE', { gap, gapSizeKB: Math.round(gapSize/1024), retry: inFlightRecord.retryCount });
                                 task.pendingRanges.unshift(gap);
                             }
                         } else {
-                            // Split and requeue
+                            // Chỉ split khi mảnh thực sự lớn
                             const mid = gap.start_byte + Math.floor(gapSize / 2);
-                            logDiag('SPLIT_RANGE', { gap, splitAt: mid });
+                            logDiag('SPLIT_RANGE', { gap, splitAt: mid, splitSizeKB: Math.round(gapSize/2/1024) });
                             task.pendingRanges.unshift({ start_byte: mid, end_byte: gap.end_byte });
                             task.pendingRanges.unshift({ start_byte: gap.start_byte, end_byte: mid });
                         }
