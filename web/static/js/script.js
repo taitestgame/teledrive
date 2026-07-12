@@ -3344,6 +3344,10 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 return;
             }
 
+            // Calculate overall missing ranges
+            const fullCoverage = { start_byte: 0, end_byte: file.size };
+            task.pendingRanges = subtractRanges(fullCoverage, task.confirmedRanges);
+
             // Create 3 independent workers
             class UploadWorker {
                 constructor(id) {
