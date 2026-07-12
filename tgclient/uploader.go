@@ -454,6 +454,9 @@ func (t *parallelProgressTracker) UpdatePartProgress(partIndex int, uploaded int
 	delta := uploaded - t.partSizes[partIndex]
 	t.partSizes[partIndex] = uploaded
 	t.runningTotal += delta
+	if t.runningTotal < 0 {
+		t.runningTotal = 0
+	}
 	totalUploaded := t.runningTotal
 	t.mu.Unlock()
 
@@ -469,6 +472,19 @@ func (t *parallelProgressTracker) UpdatePartProgress(partIndex int, uploaded int
 		percent = 99
 	}
 	UpdateTaskWithSize(t.taskID, "telegram", percent, "", t.totalSize, totalUploaded, t.owner)
+}
+
+// ResetPartProgress zeroes out a part's tracked progress before retry,
+// preventing negative deltas that cause the progress bar to go backward.
+func (t *parallelProgressTracker) ResetPartProgress(partIndex int) {
+	t.mu.Lock()
+	old := t.partSizes[partIndex]
+	t.partSizes[partIndex] = 0
+	t.runningTotal -= old
+	if t.runningTotal < 0 {
+		t.runningTotal = 0
+	}
+	t.mu.Unlock()
 }
 
 type parallelUploadProgress struct {
@@ -585,6 +601,10 @@ func uploadPartsCore(
 					}
 					if parallelCtx.Err() != nil {
 						break
+					}
+					// Reset progress for this part to prevent negative delta on retry
+					if tracker != nil {
+						tracker.ResetPartProgress(partIdx)
 					}
 					if _, err := sectionReader.Seek(0, io.SeekStart); err != nil {
 						log.Printf("[Upload] Failed to seek section reader: %v", err)
