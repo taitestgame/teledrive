@@ -88,7 +88,7 @@ func executeRestart() {
 }
 
 var (
-	version = "v3.8.3-opt19"
+	version = "v3.8.3-opt20"
 	commit  = "none"
 	date    = "unknown"
 )

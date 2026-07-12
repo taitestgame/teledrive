@@ -3240,19 +3240,16 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
 
         async uploadSingleFile(file, taskId, targetPath, overwrite = false) {
             // CENTRALIZED CONSTANTS
-            const INITIAL_CHUNK_SIZE = 2 * 1024 * 1024;     // Bắt đầu 2MB thay vì 5MB - phù hợp với mạng yếu
+            const INITIAL_CHUNK_SIZE = 2 * 1024 * 1024;
             const MIN_CHUNK_SIZE = 512 * 1024;
             const MAX_CHUNK_SIZE = 50 * 1024 * 1024;
-            const INITIAL_CONCURRENCY = 1;                   // Bắt đầu 1 luồng - tránh bão hoà mạng yếu
-            const MIN_CONCURRENCY = 1;
-            const MAX_CONCURRENCY = 3;
-            const WATCHDOG_INTERVAL = 500;                   // Giảm tần số kiểm tra để nhẹ tải CPU
-            const STALL_TIMEOUT = 25000;                     // 25 giây - phù hợp với mạng chậm + Cloudflare latency
-            const TARGET_REQUEST_TIME = 30000;               // Nhắm mỗi mảnh xong trong 30 giây
-            const PREDICTIVE_SPLIT_LIMIT = 90000;            // Cảnh báo sớm nếu dự báo vượt 90 giây
-            const CLIENT_HARD_LIMIT = 100000;                // Giới hạn cứng 100 giây
-            const MIN_STABLE_SAMPLES_FOR_GROWTH = 3;         // Cần 3 lần thành công liên tiếp mới tăng
-            const STARTING_TIMEOUT = 15000;                  // 15 giây để thiết lập kết nối qua Cloudflare
+            const WATCHDOG_INTERVAL = 250;
+            const STALL_TIMEOUT = 25000;
+            const TARGET_REQUEST_TIME = 30000;
+            const PREDICTIVE_SPLIT_LIMIT = 90000;
+            const CLIENT_HARD_LIMIT = 100000;
+            const MIN_STABLE_SAMPLES_FOR_GROWTH = 3;
+            const STARTING_TIMEOUT = 15000;
 
             // RANGE HELPER FUNCTIONS
             const normalizeRanges = (ranges) => {
@@ -3321,10 +3318,6 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
             task.pendingRanges = [];
             task.inFlightRanges = [];
             task.deferredRanges = [];
-            task.currentAdaptiveChunkSize = INITIAL_CHUNK_SIZE;
-            task.currentConcurrency = INITIAL_CONCURRENCY;
-            task.ewmaThroughput = 0;
-            task.stableSuccessCount = 0;
             task.uploadedBytes = 0;
             task.progress = 0;
             task.hasError = false;
@@ -3342,31 +3335,253 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 console.error("Failed to query backend ranges on startup:", e);
             }
 
-            // Calculate overall missing ranges
-            const fullCoverage = { start_byte: 0, end_byte: file.size };
-            task.pendingRanges = subtractRanges(fullCoverage, task.confirmedRanges);
-
-            // If file is already fully uploaded, finish
             const countConfirmedBytes = () => task.confirmedRanges.reduce((sum, r) => sum + (r.end_byte - r.start_byte), 0);
             if (countConfirmedBytes() >= file.size && file.size > 0) {
                 logDiag('COMPLETE', { taskId, msg: "Already completed on backend" });
                 task.progress = 50;
                 task.statusText = this.t('syncing_tg');
-                // Poll/wait for WS or fallback polling
                 this.startFallbackPolling(taskId);
                 return;
             }
+
+            // Create 3 independent workers
+            class UploadWorker {
+                constructor(id) {
+                    this.id = id;
+                    this.currentChunkSize = INITIAL_CHUNK_SIZE;
+                    this.ewmaThroughput = 0;
+                    this.stableSuccessCount = 0;
+                    
+                    this.activeRange = null;
+                    this.xhr = null;
+                    this.lifecycleState = "IDLE";
+                    this.requestStartTime = 0;
+                    this.firstProgressTime = null;
+                    this.lastMeaningfulProgressTime = 0;
+                    this.previousLoadedBytes = 0;
+                    this.currentLoadedBytes = 0;
+                    this.retryCount = 0;
+                    this.recoveryStarted = false;
+                    this.watchdogInterval = null;
+                }
+
+                reset() {
+                    if (this.watchdogInterval) {
+                        clearInterval(this.watchdogInterval);
+                        this.watchdogInterval = null;
+                    }
+                    this.activeRange = null;
+                    this.xhr = null;
+                    this.lifecycleState = "IDLE";
+                    this.requestStartTime = 0;
+                    this.firstProgressTime = null;
+                    this.lastMeaningfulProgressTime = 0;
+                    this.previousLoadedBytes = 0;
+                    this.currentLoadedBytes = 0;
+                    this.recoveryStarted = false;
+                }
+            }
+
+            const workers = [
+                new UploadWorker(0),
+                new UploadWorker(1),
+                new UploadWorker(2)
+            ];
+
+            const getInFlightReservations = () => {
+                const reservations = [];
+                for (const w of workers) {
+                    if (w.activeRange && w.lifecycleState !== "IDLE" && w.lifecycleState !== "RECOVERING") {
+                        reservations.push(w.activeRange);
+                    }
+                }
+                return reservations;
+            };
+
+            const getAvailableRanges = () => {
+                const fullCoverage = { start_byte: 0, end_byte: file.size };
+                const excluded = [
+                    ...task.confirmedRanges,
+                    ...getInFlightReservations()
+                ];
+                return subtractRanges(fullCoverage, excluded);
+            };
+
+            const getNextRangeForWorker = (worker) => {
+                while (task.pendingRanges.length > 0) {
+                    const candidate = task.pendingRanges.shift();
+                    const excluded = [
+                        ...task.confirmedRanges,
+                        ...getInFlightReservations()
+                    ];
+                    const remaining = subtractRanges(candidate, excluded);
+                    if (remaining.length > 0) {
+                        const r = remaining[0];
+                        const size = Math.floor(Math.min(worker.currentChunkSize, r.end_byte - r.start_byte));
+                        if (size < r.end_byte - r.start_byte) {
+                            task.pendingRanges.unshift({ start_byte: r.start_byte + size, end_byte: r.end_byte });
+                        }
+                        return { start_byte: r.start_byte, end_byte: r.start_byte + size };
+                    }
+                }
+
+                const available = getAvailableRanges();
+                if (available.length > 0) {
+                    const firstGap = available[0];
+                    const size = Math.floor(Math.min(worker.currentChunkSize, firstGap.end_byte - firstGap.start_byte));
+                    return { start_byte: firstGap.start_byte, end_byte: firstGap.start_byte + size };
+                }
+
+                return null;
+            };
+
+            const updateTaskSpeed = () => {
+                let totalThroughput = 0;
+                let activeCount = 0;
+                for (const w of workers) {
+                    if (w.lifecycleState === "TRANSFERRING" && w.ewmaThroughput > 0) {
+                        totalThroughput += w.ewmaThroughput;
+                        activeCount++;
+                    }
+                }
+                if (activeCount > 0) {
+                    task.speed = totalThroughput;
+                }
+            };
+
+            const updateProgressUI = () => {
+                const confirmedBytes = countConfirmedBytes();
+                const activeInFlightBytes = workers.reduce((sum, w) => sum + w.currentLoadedBytes, 0);
+                task.uploadedBytes = Math.min(file.size, confirmedBytes + activeInFlightBytes);
+                task.progress = Math.min(50, Math.round((task.uploadedBytes / file.size) * 50));
+
+                const uploadedStr = this.formatBytes(task.uploadedBytes);
+                const totalStr = this.formatBytes(file.size);
+                const completedChunks = Math.round(confirmedBytes / INITIAL_CHUNK_SIZE);
+                const estimatedTotalChunks = Math.ceil(file.size / INITIAL_CHUNK_SIZE);
+                task.statusText = `${this.t('pushing', { uploaded: uploadedStr, total: totalStr })} (Mảnh ${completedChunks}/${estimatedTotalChunks})`;
+            };
 
             let schedulerResolve;
             let _heartbeatTimer = null;
             const schedulerPromise = new Promise(resolve => {
                 schedulerResolve = () => {
                     if (_heartbeatTimer) { clearInterval(_heartbeatTimer); _heartbeatTimer = null; }
+                    for (const w of workers) {
+                        w.reset();
+                    }
                     resolve();
                 };
             });
 
-            const startXhr = (range) => {
+            const startWatchdog = (worker) => {
+                if (worker.watchdogInterval) {
+                    clearInterval(worker.watchdogInterval);
+                }
+                worker.watchdogInterval = setInterval(() => {
+                    const currentTask = this.uploadQueue.find(t => t.id === taskId);
+                    if (!currentTask || currentTask.isCancelled || currentTask.hasError) {
+                        worker.reset();
+                        return;
+                    }
+
+                    const now = Date.now();
+                    if (worker.lifecycleState === "STARTING") {
+                        if (now - worker.requestStartTime > STARTING_TIMEOUT) {
+                            logDiag('STALL_TIMEOUT', { range: worker.activeRange, state: "STARTING", workerId: worker.id });
+                            triggerWorkerRecovery(worker, "STARTING_TIMEOUT");
+                        }
+                    } else if (worker.lifecycleState === "TRANSFERRING") {
+                        if (now - worker.lastMeaningfulProgressTime > STALL_TIMEOUT) {
+                            logDiag('STALL_TIMEOUT', { range: worker.activeRange, state: "TRANSFERRING", workerId: worker.id });
+                            triggerWorkerRecovery(worker, "STALL");
+                        } else {
+                            const elapsed = (now - worker.requestStartTime) / 1000;
+                            if (elapsed > 5 && worker.ewmaThroughput > 0) {
+                                const remainingBytes = (worker.activeRange.end_byte - worker.activeRange.start_byte) - worker.currentLoadedBytes;
+                                const predictedTotalDuration = (elapsed * 1000) + (remainingBytes / worker.ewmaThroughput) * 1000;
+                                if (predictedTotalDuration > PREDICTIVE_SPLIT_LIMIT) {
+                                    logDiag('PREDICTIVE_TIMEOUT_RISK', { range: worker.activeRange, predictedTotalDuration, workerId: worker.id });
+                                    triggerWorkerRecovery(worker, "PREDICTIVE_TIMEOUT");
+                                }
+                            }
+                        }
+                    }
+
+                    if (worker.lifecycleState !== "IDLE" && !worker.recoveryStarted && (now - worker.requestStartTime > CLIENT_HARD_LIMIT)) {
+                        logDiag('CLIENT_HARD_LIMIT', { range: worker.activeRange, workerId: worker.id });
+                        triggerWorkerRecovery(worker, "HARD_LIMIT");
+                    }
+                }, WATCHDOG_INTERVAL);
+            };
+
+            const triggerWorkerRecovery = (worker, reason) => {
+                if (worker.recoveryStarted) return;
+                worker.recoveryStarted = true;
+                if (worker.xhr) {
+                    worker.xhr.onload = null;
+                    worker.xhr.onerror = null;
+                    worker.xhr.onabort = null;
+                    worker.xhr.abort();
+                }
+                if (task && task._xhrs && worker.xhr) {
+                    task._xhrs = task._xhrs.filter(x => x !== worker.xhr);
+                }
+                handleWorkerFailure(worker, reason);
+            };
+
+            const handleWorkerFailure = async (worker, reason) => {
+                const failedRange = worker.activeRange;
+                worker.lifecycleState = "RECOVERING";
+                
+                worker.stableSuccessCount = 0;
+                worker.currentChunkSize = Math.max(MIN_CHUNK_SIZE, Math.floor(worker.currentChunkSize / 2));
+                logDiag('WORKER_SHRINK', { workerId: worker.id, chunkSize: worker.currentChunkSize, reason });
+
+                logDiag('CHECK_BACKEND', { taskId, reason: `Worker ${worker.id} failure recovery` });
+                try {
+                    const checkRes = await fetch(`/api/upload/check/${taskId}`);
+                    if (checkRes.ok) {
+                        const checkData = await checkRes.json();
+                        task.confirmedRanges = normalizeRanges(checkData.ranges || []);
+                    }
+                } catch (e) {
+                    console.error("Failed to query backend ranges during recovery:", e);
+                }
+
+                const missingGaps = subtractRanges(failedRange, task.confirmedRanges);
+                if (missingGaps.length > 0) {
+                    for (const gap of missingGaps) {
+                        const gapSize = gap.end_byte - gap.start_byte;
+                        if (gapSize <= MIN_CHUNK_SIZE) {
+                            worker.retryCount++;
+                            if (worker.retryCount > 8) {
+                                logDiag('DEFER_RANGE', { gap, workerId: worker.id });
+                                task.deferredRanges.push(gap);
+                            } else {
+                                logDiag('RETRY_SMALL_RANGE', { gap, gapSizeKB: Math.round(gapSize/1024), retry: worker.retryCount, workerId: worker.id });
+                                task.pendingRanges.unshift(gap);
+                            }
+                        } else {
+                            const mid = Math.floor(gap.start_byte) + Math.floor(gapSize / 2);
+                            logDiag('SPLIT_RANGE', { gap, splitAt: mid, splitSizeKB: Math.round(gapSize/2/1024), workerId: worker.id });
+                            task.pendingRanges.unshift({ start_byte: Math.floor(mid), end_byte: Math.floor(gap.end_byte) });
+                            task.pendingRanges.unshift({ start_byte: Math.floor(gap.start_byte), end_byte: Math.floor(mid) });
+                        }
+                    }
+                }
+
+                worker.reset();
+                scheduleNext();
+            };
+
+            const startWorkerXhr = (worker, range) => {
+                worker.reset();
+                worker.activeRange = range;
+                worker.lifecycleState = "STARTING";
+                worker.requestStartTime = Date.now();
+                worker.lastMeaningfulProgressTime = Date.now();
+
                 const start = range.start_byte;
                 const end = range.end_byte;
                 const chunk = file.slice(start, end);
@@ -3381,6 +3596,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 fd.append('overwrite', overwrite ? "true" : "false");
 
                 const xhr = new XMLHttpRequest();
+                worker.xhr = xhr;
                 if (task) {
                     if (!task._xhrs) task._xhrs = [];
                     task._xhrs.push(xhr);
@@ -3389,145 +3605,61 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 xhr.open('POST', '/api/upload');
                 xhr.setRequestHeader('X-CSRF-Token', TeleCloud.getCsrfToken());
 
-                const inFlightRecord = {
-                    range,
-                    xhr,
-                    lifecycleState: "STARTING",
-                    requestStartTime: Date.now(),
-                    firstProgressTime: null,
-                    lastMeaningfulProgressTime: Date.now(),
-                    previousLoadedBytes: 0,
-                    currentLoadedBytes: 0,
-                    retryCount: 0,
-                    recoveryStarted: false
-                };
-                task.inFlightRanges.push(inFlightRecord);
-
                 let lastProgressTime = Date.now();
-
-                const watchdog = setInterval(() => {
-                    const currentTask = this.uploadQueue.find(t => t.id === taskId);
-                    if (!currentTask || currentTask.isCancelled || currentTask.hasError) {
-                        clearInterval(watchdog);
-                        return;
-                    }
-
-                    const now = Date.now();
-                    if (inFlightRecord.lifecycleState === "STARTING") {
-                        if (now - inFlightRecord.requestStartTime > STARTING_TIMEOUT) {
-                            logDiag('STALL_TIMEOUT', { range, state: "STARTING" });
-                            clearInterval(watchdog);
-                            inFlightRecord.recoveryStarted = true;
-                            xhr.abort();
-                            handleRequestFailure(inFlightRecord, "STARTING_TIMEOUT");
-                        }
-                    } else if (inFlightRecord.lifecycleState === "TRANSFERRING") {
-                        // 2-second stall watchdog
-                        if (now - inFlightRecord.lastMeaningfulProgressTime > STALL_TIMEOUT) {
-                            logDiag('STALL_TIMEOUT', { range, state: "TRANSFERRING" });
-                            clearInterval(watchdog);
-                            inFlightRecord.recoveryStarted = true;
-                            xhr.abort();
-                            handleRequestFailure(inFlightRecord, "STALL");
-                        } else {
-                            // Predictive timeout protection
-                            const elapsed = (now - inFlightRecord.requestStartTime) / 1000;
-                            if (elapsed > 5 && task.ewmaThroughput > 0) {
-                                const remainingBytes = (end - start) - inFlightRecord.currentLoadedBytes;
-                                const predictedTotalDuration = (elapsed * 1000) + (remainingBytes / task.ewmaThroughput) * 1000;
-                                if (predictedTotalDuration > PREDICTIVE_SPLIT_LIMIT) {
-                                    logDiag('PREDICTIVE_TIMEOUT_RISK', { range, predictedTotalDuration });
-                                    clearInterval(watchdog);
-                                    inFlightRecord.recoveryStarted = true;
-                                    xhr.abort();
-                                    handleRequestFailure(inFlightRecord, "PREDICTIVE_TIMEOUT");
-                                }
-                            }
-                        }
-                    }
-
-                    // 75-second hard limit
-                    if (!inFlightRecord.recoveryStarted && (now - inFlightRecord.requestStartTime > CLIENT_HARD_LIMIT)) {
-                        logDiag('CLIENT_HARD_LIMIT', { range });
-                        clearInterval(watchdog);
-                        inFlightRecord.recoveryStarted = true;
-                        xhr.abort();
-                        handleRequestFailure(inFlightRecord, "HARD_LIMIT");
-                    }
-                }, WATCHDOG_INTERVAL);
+                startWatchdog(worker);
 
                 xhr.upload.onprogress = (e) => {
                     if (e.lengthComputable) {
                         const now = Date.now();
-                        if (inFlightRecord.lifecycleState === "STARTING") {
-                            inFlightRecord.lifecycleState = "TRANSFERRING";
-                            inFlightRecord.firstProgressTime = now;
+                        if (worker.lifecycleState === "STARTING") {
+                            worker.lifecycleState = "TRANSFERRING";
+                            worker.firstProgressTime = now;
                         }
 
-                        if (e.loaded > inFlightRecord.previousLoadedBytes) {
-                            inFlightRecord.lastMeaningfulProgressTime = now;
-                            const delta = e.loaded - inFlightRecord.previousLoadedBytes;
-                            inFlightRecord.previousLoadedBytes = e.loaded;
-                            inFlightRecord.currentLoadedBytes = e.loaded;
+                        if (e.loaded > worker.previousLoadedBytes) {
+                            worker.lastMeaningfulProgressTime = now;
+                            const delta = e.loaded - worker.previousLoadedBytes;
+                            worker.previousLoadedBytes = e.loaded;
+                            worker.currentLoadedBytes = e.loaded;
 
                             const sampleElapsed = (now - lastProgressTime) / 1000;
                             if (sampleElapsed > 0.05 && delta > 0) {
                                 const instThroughput = delta / sampleElapsed;
-                                if (task.ewmaThroughput === 0) {
-                                    task.ewmaThroughput = instThroughput;
+                                if (worker.ewmaThroughput === 0) {
+                                    worker.ewmaThroughput = instThroughput;
                                 } else {
-                                    task.ewmaThroughput = (task.ewmaThroughput * 0.8) + (instThroughput * 0.2);
+                                    worker.ewmaThroughput = (worker.ewmaThroughput * 0.8) + (instThroughput * 0.2);
                                 }
-                                task.speed = task.ewmaThroughput;
+                                updateTaskSpeed();
                             }
                             lastProgressTime = now;
 
-                            // Update progress UI using unique confirmed bytes + in-flight loaded bytes
-                            const confirmedBytes = countConfirmedBytes();
-                            const activeInFlightBytes = task.inFlightRanges.reduce((sum, r) => sum + r.currentLoadedBytes, 0);
-                            task.uploadedBytes = Math.min(file.size, confirmedBytes + activeInFlightBytes);
-                            task.progress = Math.min(50, Math.round((task.uploadedBytes / file.size) * 50));
-
-                            const uploadedStr = this.formatBytes(task.uploadedBytes);
-                            const totalStr = this.formatBytes(file.size);
-                            const completedChunks = Math.round(confirmedBytes / task.currentAdaptiveChunkSize);
-                            const estimatedTotalChunks = Math.ceil(file.size / task.currentAdaptiveChunkSize);
-                            task.statusText = `${this.t('pushing', { uploaded: uploadedStr, total: totalStr })} (Mảnh ${completedChunks}/${estimatedTotalChunks})`;
+                            updateProgressUI();
                         }
                     }
                 };
 
                 xhr.onload = () => {
-                    clearInterval(watchdog);
+                    worker.reset();
                     if (task && task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
-                    
+
                     if (xhr.status >= 200 && xhr.status < 300) {
-                        inFlightRecord.lifecycleState = "COMPLETED";
-                        task.inFlightRanges = task.inFlightRanges.filter(r => r.range.start_byte !== inFlightRecord.range.start_byte);
-                        
                         task.confirmedRanges.push(range);
                         task.confirmedRanges = normalizeRanges(task.confirmedRanges);
 
-                        // Success behavior: Adaptive chunk growth
-                        task.stableSuccessCount++;
-                        if (task.stableSuccessCount >= MIN_STABLE_SAMPLES_FOR_GROWTH) {
-                            // Target Chunk Size calculation
-                            if (task.ewmaThroughput > 0) {
-                                const nextSize = task.ewmaThroughput * (TARGET_REQUEST_TIME / 1000);
-                                task.currentAdaptiveChunkSize = Math.floor(Math.max(MIN_CHUNK_SIZE, Math.min(MAX_CHUNK_SIZE, nextSize)));
+                        worker.stableSuccessCount++;
+                        if (worker.stableSuccessCount >= MIN_STABLE_SAMPLES_FOR_GROWTH) {
+                            if (worker.ewmaThroughput > 0) {
+                                const nextSize = worker.ewmaThroughput * (TARGET_REQUEST_TIME / 1000);
+                                worker.currentChunkSize = Math.floor(Math.max(MIN_CHUNK_SIZE, Math.min(MAX_CHUNK_SIZE, nextSize)));
                             } else {
-                                task.currentAdaptiveChunkSize = Math.floor(Math.min(MAX_CHUNK_SIZE, task.currentAdaptiveChunkSize * 1.5));
+                                worker.currentChunkSize = Math.floor(Math.min(MAX_CHUNK_SIZE, worker.currentChunkSize * 1.5));
                             }
-                            // Concurrency growth
-                            if (task.currentConcurrency < MAX_CONCURRENCY) {
-                                task.currentConcurrency++;
-                                logDiag('CONCURRENCY_INCREASE', { concurrency: task.currentConcurrency });
-                            }
-                            task.stableSuccessCount = 0;
-                            logDiag('CHUNK_SIZE_UPDATE', { chunkSize: task.currentAdaptiveChunkSize });
+                            worker.stableSuccessCount = 0;
+                            logDiag('WORKER_CHUNK_GROW', { workerId: worker.id, chunkSize: worker.currentChunkSize });
                         }
 
-                        logDiag('UPLOAD_SUCCESS', { range });
+                        logDiag('UPLOAD_SUCCESS', { range, workerId: worker.id });
 
                         try {
                             const result = JSON.parse(xhr.responseText);
@@ -3543,80 +3675,25 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                             const errJson = JSON.parse(xhr.responseText);
                             if (errJson.error) errMsg = errJson.error;
                         } catch (e) {}
-                        handleRequestFailure(inFlightRecord, errMsg);
+                        handleWorkerFailure(worker, errMsg);
                     }
                 };
 
                 xhr.onerror = () => {
-                    clearInterval(watchdog);
+                    worker.reset();
                     if (task && task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
-                    handleRequestFailure(inFlightRecord, "Network Error");
+                    handleWorkerFailure(worker, "Network Error");
                 };
 
                 xhr.onabort = () => {
-                    clearInterval(watchdog);
+                    worker.reset();
                     if (task && task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
-                    // Do not handle abort here if it was already handled by watchdog/predictive aborts
-                    if (!inFlightRecord.recoveryStarted) {
-                        handleRequestFailure(inFlightRecord, "Aborted");
+                    if (!worker.recoveryStarted) {
+                        handleWorkerFailure(worker, "Aborted");
                     }
                 };
 
                 xhr.send(fd);
-            };
-
-            const handleRequestFailure = async (inFlightRecord, reason) => {
-                inFlightRecord.lifecycleState = "FAILED";
-                task.inFlightRanges = task.inFlightRanges.filter(r => r.range.start_byte !== inFlightRecord.range.start_byte);
-                
-                // Adaptive Sizing reduction
-                task.stableSuccessCount = 0;
-                task.currentAdaptiveChunkSize = Math.max(MIN_CHUNK_SIZE, Math.floor(task.currentAdaptiveChunkSize / 2));
-                task.currentConcurrency = Math.max(MIN_CONCURRENCY, task.currentConcurrency - 1);
-                logDiag('CONCURRENCY_DECREASE', { concurrency: task.currentConcurrency });
-                logDiag('CHUNK_SIZE_UPDATE', { chunkSize: task.currentAdaptiveChunkSize });
-
-                // Query Backend Authoritative Ranges to subtract confirmed parts
-                logDiag('CHECK_BACKEND', { taskId, reason: "Failure recovery" });
-                try {
-                    const checkRes = await fetch(`/api/upload/check/${taskId}`);
-                    if (checkRes.ok) {
-                        const checkData = await checkRes.json();
-                        task.confirmedRanges = normalizeRanges(checkData.ranges || []);
-                    }
-                } catch (e) {
-                    console.error("Failed to query backend ranges during recovery:", e);
-                }
-
-                // Calculate missing subranges of the failed request
-                const missingGaps = subtractRanges(inFlightRecord.range, task.confirmedRanges);
-                if (missingGaps.length > 0) {
-                    for (const gap of missingGaps) {
-                        const gapSize = gap.end_byte - gap.start_byte;
-                        // FIX: Chỉ split nếu mảnh còn lớn hơn 4x kích thước tối thiểu.
-                        // Nếu mảnh đã nhỏ thì RETRY TRỰC TIẾP thay vì chia đôi liên tục.
-                        const SPLIT_THRESHOLD = 4 * MIN_CHUNK_SIZE; // 2MB
-                        if (gapSize <= SPLIT_THRESHOLD) {
-                            // Retry trực tiếp mảnh nhỏ - không chia thêm
-                            inFlightRecord.retryCount++;
-                            if (inFlightRecord.retryCount > 8) {
-                                logDiag('DEFER_RANGE', { gap });
-                                task.deferredRanges.push(gap);
-                            } else {
-                                logDiag('RETRY_SMALL_RANGE', { gap, gapSizeKB: Math.round(gapSize/1024), retry: inFlightRecord.retryCount });
-                                task.pendingRanges.unshift(gap);
-                            }
-                        } else {
-                            // Chỉ split khi mảnh thực sự lớn
-                            const mid = Math.floor(gap.start_byte) + Math.floor(gapSize / 2);
-                            logDiag('SPLIT_RANGE', { gap, splitAt: mid, splitSizeKB: Math.round(gapSize/2/1024) });
-                            task.pendingRanges.unshift({ start_byte: Math.floor(mid), end_byte: Math.floor(gap.end_byte) });
-                            task.pendingRanges.unshift({ start_byte: Math.floor(gap.start_byte), end_byte: Math.floor(mid) });
-                        }
-                    }
-                }
-
-                scheduleNext();
             };
 
             const scheduleNext = () => {
@@ -3626,12 +3703,11 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                     hasCurrentTask: !!currentTask,
                     isCancelled: currentTask ? currentTask.isCancelled : false,
                     hasError: task.hasError,
-                    inFlightCount: task.inFlightRanges.length,
-                    concurrency: task.currentConcurrency,
+                    inFlightCount: workers.filter(w => w.lifecycleState !== "IDLE").length,
                     pendingCount: task.pendingRanges.length,
-                    deferredCount: task.deferredRanges.length,
-                    chunkSize: task.currentAdaptiveChunkSize
+                    deferredCount: task.deferredRanges.length
                 });
+
                 if (!currentTask || currentTask.isCancelled) {
                     schedulerResolve();
                     return;
@@ -3644,7 +3720,6 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
 
                 const confirmedBytes = countConfirmedBytes();
                 if (confirmedBytes >= file.size) {
-                    // Exact coverage completion
                     logDiag('COMPLETE', { taskId });
                     task.progress = 50;
                     task.statusText = this.t('syncing_tg');
@@ -3652,15 +3727,13 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                     return;
                 }
 
-                // If pending is empty but we have deferred ranges, retry them now
-                if (task.pendingRanges.length === 0 && task.inFlightRanges.length === 0 && task.deferredRanges.length > 0) {
+                if (task.pendingRanges.length === 0 && workers.every(w => w.lifecycleState === "IDLE") && task.deferredRanges.length > 0) {
                     logDiag('RESUME_RANGE', { deferredCount: task.deferredRanges.length });
                     task.pendingRanges = [...task.deferredRanges];
                     task.deferredRanges = [];
                 }
 
-                // If all ranges fail completely and nothing is pending/in-flight, throw error
-                if (task.pendingRanges.length === 0 && task.inFlightRanges.length === 0) {
+                if (task.pendingRanges.length === 0 && workers.every(w => w.lifecycleState === "IDLE")) {
                     logDiag('FAILED', { taskId, reason: "No more ranges to upload and target size not met" });
                     task.statusText = this.t('conn_error');
                     task.hasError = true;
@@ -3668,28 +3741,18 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                     return;
                 }
 
-                // Dynamic scheduling loop: start requests up to current adaptive concurrency limit
-                while (task.inFlightRanges.length < task.currentConcurrency && task.pendingRanges.length > 0) {
-                    // Pop next missing range
-                    const R = task.pendingRanges.shift();
-                    const size = Math.floor(Math.min(task.currentAdaptiveChunkSize, R.end_byte - R.start_byte));
-                    const subR = { start_byte: Math.floor(R.start_byte), end_byte: Math.floor(R.start_byte + size) };
-                    
-                    // If there is remainder, push it back to the pending queue
-                    if (Math.floor(R.start_byte + size) < Math.floor(R.end_byte)) {
-                        task.pendingRanges.unshift({ start_byte: Math.floor(R.start_byte + size), end_byte: Math.floor(R.end_byte) });
+                for (const w of workers) {
+                    if (w.lifecycleState === "IDLE") {
+                        const nextRange = getNextRangeForWorker(w);
+                        if (nextRange) {
+                            startWorkerXhr(w, nextRange);
+                        }
                     }
-
-                    // Reserve and execute before any asynchronous delay
-                    startXhr(subR);
                 }
             };
 
-            // Start the first batch of requests
             scheduleNext();
 
-            // SAFETY HEARTBEAT: If the scheduler stops unexpectedly (no in-flight, pending > 0),
-            // restart it. This handles race conditions or Vue reactivity edge cases.
             _heartbeatTimer = setInterval(() => {
                 const hbTask = this.uploadQueue.find(t => t.id === taskId);
                 if (!hbTask || hbTask.isCancelled || hbTask.hasError) {
@@ -3698,16 +3761,14 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 if (countConfirmedBytes() >= file.size) {
                     clearInterval(_heartbeatTimer); _heartbeatTimer = null; return;
                 }
-                if (task.inFlightRanges.length === 0 && (task.pendingRanges.length > 0 || task.deferredRanges.length > 0)) {
+                if (workers.every(w => w.lifecycleState === "IDLE") && (task.pendingRanges.length > 0 || task.deferredRanges.length > 0)) {
                     logDiag('HEARTBEAT_RESTART', { pendingCount: task.pendingRanges.length, deferredCount: task.deferredRanges.length });
                     scheduleNext();
                 }
             }, 4000);
 
-            // Wait for completion
             await schedulerPromise;
 
-            // Start status polling to wait for Telegram sync
             if (!task.hasError && !task.isCancelled) {
                 this.startFallbackPolling(taskId);
             }
