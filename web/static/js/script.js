@@ -3259,8 +3259,8 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 if (!ranges || ranges.length === 0) return [];
                 const valid = [];
                 for (const r of ranges) {
-                    const start = typeof r.start_byte === 'number' ? r.start_byte : parseInt(r.start_byte);
-                    const end = typeof r.end_byte === 'number' ? r.end_byte : parseInt(r.end_byte);
+                    const start = typeof r.start_byte === 'number' ? Math.floor(r.start_byte) : parseInt(r.start_byte);
+                    const end = typeof r.end_byte === 'number' ? Math.floor(r.end_byte) : parseInt(r.end_byte);
                     if (!isNaN(start) && !isNaN(end) && start >= 0 && end > start) {
                         valid.push({ start_byte: start, end_byte: end });
                     }
@@ -3514,9 +3514,9 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                             // Target Chunk Size calculation
                             if (task.ewmaThroughput > 0) {
                                 const nextSize = task.ewmaThroughput * (TARGET_REQUEST_TIME / 1000);
-                                task.currentAdaptiveChunkSize = Math.max(MIN_CHUNK_SIZE, Math.min(MAX_CHUNK_SIZE, nextSize));
+                                task.currentAdaptiveChunkSize = Math.floor(Math.max(MIN_CHUNK_SIZE, Math.min(MAX_CHUNK_SIZE, nextSize)));
                             } else {
-                                task.currentAdaptiveChunkSize = Math.min(MAX_CHUNK_SIZE, task.currentAdaptiveChunkSize * 1.5);
+                                task.currentAdaptiveChunkSize = Math.floor(Math.min(MAX_CHUNK_SIZE, task.currentAdaptiveChunkSize * 1.5));
                             }
                             // Concurrency growth
                             if (task.currentConcurrency < MAX_CONCURRENCY) {
@@ -3608,10 +3608,10 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                             }
                         } else {
                             // Chỉ split khi mảnh thực sự lớn
-                            const mid = gap.start_byte + Math.floor(gapSize / 2);
+                            const mid = Math.floor(gap.start_byte) + Math.floor(gapSize / 2);
                             logDiag('SPLIT_RANGE', { gap, splitAt: mid, splitSizeKB: Math.round(gapSize/2/1024) });
-                            task.pendingRanges.unshift({ start_byte: mid, end_byte: gap.end_byte });
-                            task.pendingRanges.unshift({ start_byte: gap.start_byte, end_byte: mid });
+                            task.pendingRanges.unshift({ start_byte: Math.floor(mid), end_byte: Math.floor(gap.end_byte) });
+                            task.pendingRanges.unshift({ start_byte: Math.floor(gap.start_byte), end_byte: Math.floor(mid) });
                         }
                     }
                 }
@@ -3672,12 +3672,12 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 while (task.inFlightRanges.length < task.currentConcurrency && task.pendingRanges.length > 0) {
                     // Pop next missing range
                     const R = task.pendingRanges.shift();
-                    const size = Math.min(task.currentAdaptiveChunkSize, R.end_byte - R.start_byte);
-                    const subR = { start_byte: R.start_byte, end_byte: R.start_byte + size };
+                    const size = Math.floor(Math.min(task.currentAdaptiveChunkSize, R.end_byte - R.start_byte));
+                    const subR = { start_byte: Math.floor(R.start_byte), end_byte: Math.floor(R.start_byte + size) };
                     
                     // If there is remainder, push it back to the pending queue
-                    if (R.start_byte + size < R.end_byte) {
-                        task.pendingRanges.unshift({ start_byte: R.start_byte + size, end_byte: R.end_byte });
+                    if (Math.floor(R.start_byte + size) < Math.floor(R.end_byte)) {
+                        task.pendingRanges.unshift({ start_byte: Math.floor(R.start_byte + size), end_byte: Math.floor(R.end_byte) });
                     }
 
                     // Reserve and execute before any asynchronous delay
