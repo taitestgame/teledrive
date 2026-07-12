@@ -52,6 +52,7 @@ import (
 //go:embed web/static/themes/*.min.css
 //go:embed web/static/fonts web/static/webfonts
 //go:embed web/static/favicon.ico
+//go:embed web/static/favicon.png
 //go:embed web/static/locales/*.min.json
 var contentFS embed.FS
 
