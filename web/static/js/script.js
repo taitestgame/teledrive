@@ -3503,7 +3503,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                     
                     if (xhr.status >= 200 && xhr.status < 300) {
                         inFlightRecord.lifecycleState = "COMPLETED";
-                        task.inFlightRanges = task.inFlightRanges.filter(r => r !== inFlightRecord);
+                        task.inFlightRanges = task.inFlightRanges.filter(r => r.range.start_byte !== inFlightRecord.range.start_byte);
                         
                         task.confirmedRanges.push(range);
                         task.confirmedRanges = normalizeRanges(task.confirmedRanges);
@@ -3567,7 +3567,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
 
             const handleRequestFailure = async (inFlightRecord, reason) => {
                 inFlightRecord.lifecycleState = "FAILED";
-                task.inFlightRanges = task.inFlightRanges.filter(r => r !== inFlightRecord);
+                task.inFlightRanges = task.inFlightRanges.filter(r => r.range.start_byte !== inFlightRecord.range.start_byte);
                 
                 // Adaptive Sizing reduction
                 task.stableSuccessCount = 0;
