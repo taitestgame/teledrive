@@ -3358,7 +3358,13 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
             }
 
             let schedulerResolve;
-            const schedulerPromise = new Promise(resolve => { schedulerResolve = resolve; });
+            let _heartbeatTimer = null;
+            const schedulerPromise = new Promise(resolve => {
+                schedulerResolve = () => {
+                    if (_heartbeatTimer) { clearInterval(_heartbeatTimer); _heartbeatTimer = null; }
+                    resolve();
+                };
+            });
 
             const startXhr = (range) => {
                 const start = range.start_byte;
@@ -3670,6 +3676,22 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
 
             // Start the first batch of requests
             scheduleNext();
+
+            // SAFETY HEARTBEAT: If the scheduler stops unexpectedly (no in-flight, pending > 0),
+            // restart it. This handles race conditions or Vue reactivity edge cases.
+            _heartbeatTimer = setInterval(() => {
+                const hbTask = this.uploadQueue.find(t => t.id === taskId);
+                if (!hbTask || hbTask.isCancelled || hbTask.hasError) {
+                    clearInterval(_heartbeatTimer); _heartbeatTimer = null; return;
+                }
+                if (countConfirmedBytes() >= file.size) {
+                    clearInterval(_heartbeatTimer); _heartbeatTimer = null; return;
+                }
+                if (task.inFlightRanges.length === 0 && (task.pendingRanges.length > 0 || task.deferredRanges.length > 0)) {
+                    logDiag('HEARTBEAT_RESTART', { pendingCount: task.pendingRanges.length, deferredCount: task.deferredRanges.length });
+                    scheduleNext();
+                }
+            }, 4000);
 
             // Wait for completion
             await schedulerPromise;
