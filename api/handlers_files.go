@@ -450,9 +450,7 @@ func (h *Handler) handlePostUpload(c *gin.Context) {
 	if isDone {
 		rangeTrackerSync.Delete(taskID)
 		chunkTrackerSync.Delete(taskID)
-		database.DB.Exec("DELETE FROM upload_ranges WHERE task_id = ?", taskID)
 		database.DB.Exec("DELETE FROM upload_chunks WHERE task_id = ?", taskID)
-		database.DB.Exec("DELETE FROM upload_tasks WHERE id = ?", taskID)
 
 		tgclient.UpdateTask(taskID, "uploading_to_server", 100, "", username)
 

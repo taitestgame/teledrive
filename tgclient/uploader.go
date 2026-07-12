@@ -668,7 +668,6 @@ func (m *maxSizeReader) Read(p []byte) (n int, err error) {
 func ProcessCompleteUpload(ctx context.Context, filePath, filename, path, mimeType, taskID string, cfg *config.Config, overwrite bool, owner string) {
 	ctx, cancel := context.WithCancel(ctx)
 	taskMutex.Lock()
-	delete(UploadTasks, taskID)
 	TaskCancels[taskID] = cancel
 	taskMutex.Unlock()
 
@@ -762,6 +761,7 @@ func ProcessCompleteUpload(ctx context.Context, filePath, filename, path, mimeTy
 			if fileID > 0 {
 				database.DB.Exec("DELETE FROM files WHERE id = ?", fileID)
 			}
+			database.DB.Exec("UPDATE upload_tasks SET status = 'failed_processing' WHERE id = ?", taskID)
 		}
 	}()
 
@@ -845,6 +845,8 @@ func ProcessCompleteUpload(ctx context.Context, filePath, filename, path, mimeTy
 	}
 
 	UpdateTaskWithFileID(taskID, "done", 100, "", fileID, uniqueFilename, owner)
+	database.DB.Exec("DELETE FROM upload_tasks WHERE id = ?", taskID)
+	database.DB.Exec("DELETE FROM upload_ranges WHERE task_id = ?", taskID)
 
 	select {
 	case <-time.After(1000 * time.Millisecond):
@@ -860,7 +862,6 @@ func ProcessRemoteUpload(ctx context.Context, url, path, taskID string, cfg *con
 
 	ctx, cancel := context.WithCancel(ctx)
 	taskMutex.Lock()
-	delete(UploadTasks, taskID)
 	TaskCancels[taskID] = cancel
 	taskMutex.Unlock()
 
@@ -1272,7 +1273,6 @@ func ProcessCompleteUploadSync(ctx context.Context, filePath, filename, path, mi
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(ctx)
 		taskMutex.Lock()
-		delete(UploadTasks, taskID)
 		TaskCancels[taskID] = cancel
 		taskMutex.Unlock()
 		defer func() {
@@ -1586,7 +1586,6 @@ func ProcessRemoteUploadSync(ctx context.Context, url, path, taskID string, cfg 
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(ctx)
 		taskMutex.Lock()
-		delete(UploadTasks, taskID)
 		TaskCancels[taskID] = cancel
 		taskMutex.Unlock()
 		defer func() {
