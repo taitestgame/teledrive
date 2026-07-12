@@ -32,6 +32,13 @@ fi
 chmod +x ./telecloud
 echo "   [OK] Biên dịch thành công."
 
+# Sao chép đè vào thư mục chạy chính của Menu quản lý (~/telecloud-go) nếu tồn tại
+if [ -d "$HOME/telecloud-go" ]; then
+    echo "-> Phát hiện thư mục quản lý chính, đang cập nhật tệp chạy vào ~/telecloud-go..."
+    cp ./telecloud "$HOME/telecloud-go/telecloud"
+    chmod +x "$HOME/telecloud-go/telecloud"
+fi
+
 # 3. Dọn dẹp tiến trình cũ và thông báo
 killall telecloud-arm64 telecloud cloudflared 2>/dev/null || true
 echo "============================================="
