@@ -1,4 +1,4 @@
-// Silence Artplayer's persistent console logs
+﻿// Silence Artplayer's persistent console logs
 (function() {
     const originalLog = console.log;
     console.log = function(...args) {
@@ -61,35 +61,35 @@ async function ensurePdfLoaded() {
 
 const artplayerI18n = {
     'vi': {
-        'Play': 'Phát',
-        'Pause': 'Tạm dừng',
-        'Play Speed': 'Tốc độ phát',
-        'Playback Rate': 'Tốc độ phát',
-        'Aspect Ratio': 'Tỉ lệ khung hình',
-        'Normal': 'Bình thường',
-        'Flip': 'Lật video',
+        'Play': 'PhÃ¡t',
+        'Pause': 'Táº¡m dá»«ng',
+        'Play Speed': 'Tá»‘c Ä‘á»™ phÃ¡t',
+        'Playback Rate': 'Tá»‘c Ä‘á»™ phÃ¡t',
+        'Aspect Ratio': 'Tá»‰ lá»‡ khung hÃ¬nh',
+        'Normal': 'BÃ¬nh thÆ°á»ng',
+        'Flip': 'Láº­t video',
         'Horizontal': 'Xoay ngang',
-        'Vertical': 'Xoay dọc',
-        'Fullscreen': 'Toàn màn hình',
-        'Web Fullscreen': 'Toàn màn hình Web',
-        'Mini Player': 'Trình phát thu nhỏ',
-        'PIP': 'Ảnh trong ảnh',
-        'PIP Mode': 'Ảnh trong ảnh',
-        'Pip': 'Ảnh trong ảnh',
-        'Pip Mode': 'Ảnh trong ảnh',
-        'Enter PIP': 'Bật Ảnh trong ảnh',
-        'Exit PIP': 'Tắt Ảnh trong ảnh',
-        'Volume': 'Âm lượng',
-        'Mute': 'Tắt tiếng',
-        'Reconnect': 'Kết nối lại',
-        'Screenshot': 'Chụp màn hình',
-        'Subtitle': 'Phụ đề',
-        'Video info': 'Thông tin video',
-        'Close': 'Đóng',
-        'Setting': 'Cài đặt',
-        'Settings': 'Cài đặt',
-        'Show setting': 'Cài đặt',
-        'Show Setting': 'Cài đặt',
+        'Vertical': 'Xoay dá»c',
+        'Fullscreen': 'ToÃ n mÃ n hÃ¬nh',
+        'Web Fullscreen': 'ToÃ n mÃ n hÃ¬nh Web',
+        'Mini Player': 'TrÃ¬nh phÃ¡t thu nhá»',
+        'PIP': 'áº¢nh trong áº£nh',
+        'PIP Mode': 'áº¢nh trong áº£nh',
+        'Pip': 'áº¢nh trong áº£nh',
+        'Pip Mode': 'áº¢nh trong áº£nh',
+        'Enter PIP': 'Báº­t áº¢nh trong áº£nh',
+        'Exit PIP': 'Táº¯t áº¢nh trong áº£nh',
+        'Volume': 'Ã‚m lÆ°á»£ng',
+        'Mute': 'Táº¯t tiáº¿ng',
+        'Reconnect': 'Káº¿t ná»‘i láº¡i',
+        'Screenshot': 'Chá»¥p mÃ n hÃ¬nh',
+        'Subtitle': 'Phá»¥ Ä‘á»',
+        'Video info': 'ThÃ´ng tin video',
+        'Close': 'ÄÃ³ng',
+        'Setting': 'CÃ i Ä‘áº·t',
+        'Settings': 'CÃ i Ä‘áº·t',
+        'Show setting': 'CÃ i Ä‘áº·t',
+        'Show Setting': 'CÃ i Ä‘áº·t',
     }
 };
 
@@ -2084,10 +2084,10 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                                 const detailPart = errorMsg.substring(colonIdx + 2);   // e.g. "rpc error..."
                                 const translatedKey = this.t(keyPart);
                                 if (translatedKey !== keyPart) {
-                                    // Key has a translation — show "TranslatedKey (detail)"
+                                    // Key has a translation â€” show "TranslatedKey (detail)"
                                     displayError = translatedKey + ' (' + detailPart + ')';
                                 } else {
-                                    // No translation for compound key — try whole string
+                                    // No translation for compound key â€” try whole string
                                     const translatedFull = this.t(errorMsg);
                                     displayError = (translatedFull !== errorMsg) ? translatedFull : errorMsg;
                                 }
@@ -3006,7 +3006,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
 
                         // For external URLs, bypass client-side fetch to prevent violating Content Security Policy (connect-src) 
                         // and CORS restrictions. Directly request server-side remote download.
-                        this.showToast(this.t('remote_adding') || 'Đang yêu cầu máy chủ tải ảnh...', 'info');
+                        this.showToast(this.t('remote_adding') || 'Äang yÃªu cáº§u mÃ¡y chá»§ táº£i áº£nh...', 'info');
                         try {
                             const taskId = 'remote_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now();
                             const displayName = imageUrl.split('/').pop().split('?')[0] || 'dropped_image.jpg';
@@ -3015,7 +3015,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                                 id: taskId,
                                 name: 'URL: ' + displayName,
                                 progress: 0,
-                                statusText: this.t('preparing_upload') || 'Đang chuẩn bị...',
+                                statusText: this.t('preparing_upload') || 'Äang chuáº©n bá»‹...',
                                 isCancelled: false,
                                 hasError: false,
                                 status: 'preparing',
@@ -3045,7 +3045,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                             }
                         } catch (remoteErr) {
                             console.error("Server-side Remote Upload failed:", remoteErr);
-                            this.showToast(this.t('remote_failed') || 'Tải ảnh qua máy chủ thất bại', 'error');
+                            this.showToast(this.t('remote_failed') || 'Táº£i áº£nh qua mÃ¡y chá»§ tháº¥t báº¡i', 'error');
                         }
                     }
                 }
@@ -3243,6 +3243,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
             const INITIAL_CHUNK_SIZE = 2 * 1024 * 1024;
             const MIN_CHUNK_SIZE = 512 * 1024;
             const MAX_CHUNK_SIZE = 50 * 1024 * 1024;
+            const NUM_WORKERS = 3;
             const WATCHDOG_INTERVAL = 250;
             const STALL_TIMEOUT = 25000;
             const TARGET_REQUEST_TIME = 30000;
@@ -3250,60 +3251,54 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
             const CLIENT_HARD_LIMIT = 100000;
             const MIN_STABLE_SAMPLES_FOR_GROWTH = 3;
             const STARTING_TIMEOUT = 15000;
+            const MAX_GROWTH_FACTOR = 2.0;
 
             // RANGE HELPER FUNCTIONS
             const normalizeRanges = (ranges) => {
                 if (!ranges || ranges.length === 0) return [];
                 const valid = [];
                 for (const r of ranges) {
-                    const start = typeof r.start_byte === 'number' ? Math.floor(r.start_byte) : parseInt(r.start_byte);
-                    const end = typeof r.end_byte === 'number' ? Math.floor(r.end_byte) : parseInt(r.end_byte);
-                    if (!isNaN(start) && !isNaN(end) && start >= 0 && end > start) {
-                        valid.push({ start_byte: start, end_byte: end });
+                    const s = typeof r.start_byte === 'number' ? Math.floor(r.start_byte) : parseInt(r.start_byte);
+                    const e = typeof r.end_byte === 'number' ? Math.floor(r.end_byte) : parseInt(r.end_byte);
+                    if (!isNaN(s) && !isNaN(e) && s >= 0 && e > s) {
+                        valid.push({ start_byte: s, end_byte: e });
                     }
                 }
                 if (valid.length === 0) return [];
                 valid.sort((a, b) => a.start_byte - b.start_byte);
                 const result = [];
-                let current = { start_byte: valid[0].start_byte, end_byte: valid[0].end_byte };
+                let cur = { start_byte: valid[0].start_byte, end_byte: valid[0].end_byte };
                 for (let i = 1; i < valid.length; i++) {
-                    const next = valid[i];
-                    if (next.start_byte <= current.end_byte) {
-                        if (next.end_byte > current.end_byte) {
-                            current.end_byte = next.end_byte;
-                        }
+                    const nx = valid[i];
+                    if (nx.start_byte <= cur.end_byte) {
+                        if (nx.end_byte > cur.end_byte) cur.end_byte = nx.end_byte;
                     } else {
-                        result.push(current);
-                        current = { start_byte: next.start_byte, end_byte: next.end_byte };
+                        result.push(cur);
+                        cur = { start_byte: nx.start_byte, end_byte: nx.end_byte };
                     }
                 }
-                result.push(current);
+                result.push(cur);
                 return result;
             };
 
             const subtractRanges = (requested, confirmed) => {
-                let gaps = [ { start_byte: requested.start_byte, end_byte: requested.end_byte } ];
-                const normalizedConfirmed = normalizeRanges(confirmed);
-                for (const c of normalizedConfirmed) {
-                    const nextGaps = [];
+                let gaps = [{ start_byte: requested.start_byte, end_byte: requested.end_byte }];
+                const nc = normalizeRanges(confirmed);
+                for (const c of nc) {
+                    const ng = [];
                     for (const g of gaps) {
                         if (c.end_byte <= g.start_byte || c.start_byte >= g.end_byte) {
-                            nextGaps.push(g);
+                            ng.push(g);
                         } else {
-                            if (c.start_byte > g.start_byte) {
-                                nextGaps.push({ start_byte: g.start_byte, end_byte: c.start_byte });
-                            }
-                            if (c.end_byte < g.end_byte) {
-                                nextGaps.push({ start_byte: c.end_byte, end_byte: g.end_byte });
-                            }
+                            if (c.start_byte > g.start_byte) ng.push({ start_byte: g.start_byte, end_byte: c.start_byte });
+                            if (c.end_byte < g.end_byte) ng.push({ start_byte: c.end_byte, end_byte: g.end_byte });
                         }
                     }
-                    gaps = nextGaps;
+                    gaps = ng;
                 }
                 return gaps;
             };
 
-            // LOW-OVERHEAD DIAGNOSTIC LOGGING
             const logDiag = (type, details) => {
                 console.log(`[TeleCloud Diagnostic] ${type}:`, details || '');
             };
@@ -3313,7 +3308,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
 
             logDiag('UPLOAD_START', { taskId, filename: file.name, size: file.size });
 
-            // Initialize task specific state
+            // Initialize task state
             task.confirmedRanges = [];
             task.pendingRanges = [];
             task.inFlightRanges = [];
@@ -3321,8 +3316,9 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
             task.uploadedBytes = 0;
             task.progress = 0;
             task.hasError = false;
+            task._completionTriggered = false;
 
-            // Step 1: Query backend authoritative ranges
+            // Query backend for already-confirmed ranges
             logDiag('CHECK_BACKEND', { taskId });
             try {
                 const checkRes = await fetch(`/api/upload/check/${taskId}`);
@@ -3336,6 +3332,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
             }
 
             const countConfirmedBytes = () => task.confirmedRanges.reduce((sum, r) => sum + (r.end_byte - r.start_byte), 0);
+
             if (countConfirmedBytes() >= file.size && file.size > 0) {
                 logDiag('COMPLETE', { taskId, msg: "Already completed on backend" });
                 task.progress = 50;
@@ -3344,18 +3341,18 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 return;
             }
 
-            // Calculate overall missing ranges
-            const fullCoverage = { start_byte: 0, end_byte: file.size };
-            task.pendingRanges = subtractRanges(fullCoverage, task.confirmedRanges);
+            // Calculate initial missing ranges
+            task.pendingRanges = subtractRanges({ start_byte: 0, end_byte: file.size }, task.confirmedRanges);
 
-            // Create 3 independent workers
+            // UploadWorker class - each worker has independent state
             class UploadWorker {
                 constructor(id) {
                     this.id = id;
                     this.currentChunkSize = INITIAL_CHUNK_SIZE;
                     this.ewmaThroughput = 0;
                     this.stableSuccessCount = 0;
-                    
+                    this.retryCount = 0;
+
                     this.activeRange = null;
                     this.xhr = null;
                     this.lifecycleState = "IDLE";
@@ -3364,16 +3361,19 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                     this.lastMeaningfulProgressTime = 0;
                     this.previousLoadedBytes = 0;
                     this.currentLoadedBytes = 0;
-                    this.retryCount = 0;
                     this.recoveryStarted = false;
-                    this.watchdogInterval = null;
+                    this.watchdogTimer = null;
                 }
 
-                reset() {
-                    if (this.watchdogInterval) {
-                        clearInterval(this.watchdogInterval);
-                        this.watchdogInterval = null;
+                clearWatchdog() {
+                    if (this.watchdogTimer) {
+                        clearInterval(this.watchdogTimer);
+                        this.watchdogTimer = null;
                     }
+                }
+
+                resetForNextJob() {
+                    this.clearWatchdog();
                     this.activeRange = null;
                     this.xhr = null;
                     this.lifecycleState = "IDLE";
@@ -3386,84 +3386,83 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 }
             }
 
-            const workers = [
-                new UploadWorker(0),
-                new UploadWorker(1),
-                new UploadWorker(2)
-            ];
+            const workers = [];
+            for (let i = 0; i < NUM_WORKERS; i++) {
+                workers.push(new UploadWorker(i));
+            }
 
+            // Get ranges currently reserved by active workers
             const getInFlightReservations = () => {
-                const reservations = [];
+                const res = [];
                 for (const w of workers) {
-                    if (w.activeRange && w.lifecycleState !== "IDLE" && w.lifecycleState !== "RECOVERING") {
-                        reservations.push(w.activeRange);
+                    if (w.activeRange && (w.lifecycleState === "STARTING" || w.lifecycleState === "TRANSFERRING")) {
+                        res.push(w.activeRange);
                     }
                 }
-                return reservations;
+                return res;
             };
 
-            const getAvailableRanges = () => {
-                const fullCoverage = { start_byte: 0, end_byte: file.size };
-                const excluded = [
-                    ...task.confirmedRanges,
-                    ...getInFlightReservations()
-                ];
-                return subtractRanges(fullCoverage, excluded);
-            };
-
+            // Get the next available range for a worker, ensuring no overlap
             const getNextRangeForWorker = (worker) => {
+                // First try pending ranges
                 while (task.pendingRanges.length > 0) {
                     const candidate = task.pendingRanges.shift();
-                    const excluded = [
-                        ...task.confirmedRanges,
-                        ...getInFlightReservations()
-                    ];
+                    const excluded = [...task.confirmedRanges, ...getInFlightReservations()];
                     const remaining = subtractRanges(candidate, excluded);
                     if (remaining.length > 0) {
                         const r = remaining[0];
-                        const size = Math.floor(Math.min(worker.currentChunkSize, r.end_byte - r.start_byte));
-                        if (size < r.end_byte - r.start_byte) {
-                            task.pendingRanges.unshift({ start_byte: r.start_byte + size, end_byte: r.end_byte });
+                        const sz = Math.floor(Math.min(worker.currentChunkSize, r.end_byte - r.start_byte));
+                        if (sz < r.end_byte - r.start_byte) {
+                            task.pendingRanges.unshift({ start_byte: r.start_byte + sz, end_byte: r.end_byte });
                         }
-                        return { start_byte: r.start_byte, end_byte: r.start_byte + size };
+                        // Put remaining gaps back
+                        for (let i = remaining.length - 1; i >= 1; i--) {
+                            task.pendingRanges.unshift(remaining[i]);
+                        }
+                        return { start_byte: r.start_byte, end_byte: r.start_byte + sz };
                     }
                 }
 
-                const available = getAvailableRanges();
+                // Fallback: dynamically compute available gaps
+                const fullCoverage = { start_byte: 0, end_byte: file.size };
+                const excluded = [...task.confirmedRanges, ...getInFlightReservations()];
+                const available = subtractRanges(fullCoverage, excluded);
                 if (available.length > 0) {
-                    const firstGap = available[0];
-                    const size = Math.floor(Math.min(worker.currentChunkSize, firstGap.end_byte - firstGap.start_byte));
-                    return { start_byte: firstGap.start_byte, end_byte: firstGap.start_byte + size };
+                    const gap = available[0];
+                    const sz = Math.floor(Math.min(worker.currentChunkSize, gap.end_byte - gap.start_byte));
+                    return { start_byte: gap.start_byte, end_byte: gap.start_byte + sz };
                 }
 
                 return null;
             };
 
+            // Update overall task speed from all active workers
             const updateTaskSpeed = () => {
-                let totalThroughput = 0;
-                let activeCount = 0;
+                let total = 0;
                 for (const w of workers) {
-                    if (w.lifecycleState === "TRANSFERRING" && w.ewmaThroughput > 0) {
-                        totalThroughput += w.ewmaThroughput;
-                        activeCount++;
+                    if ((w.lifecycleState === "TRANSFERRING" || w.lifecycleState === "STARTING") && w.ewmaThroughput > 0) {
+                        total += w.ewmaThroughput;
                     }
                 }
-                if (activeCount > 0) {
-                    task.speed = totalThroughput;
-                }
+                if (total > 0) task.speed = total;
             };
 
+            // Update progress UI: confirmed bytes + active in-flight bytes
             const updateProgressUI = () => {
                 const confirmedBytes = countConfirmedBytes();
-                const activeInFlightBytes = workers.reduce((sum, w) => sum + w.currentLoadedBytes, 0);
+                let activeInFlightBytes = 0;
+                for (const w of workers) {
+                    if (w.lifecycleState === "TRANSFERRING" || w.lifecycleState === "STARTING") {
+                        activeInFlightBytes += w.currentLoadedBytes;
+                    }
+                }
                 task.uploadedBytes = Math.min(file.size, confirmedBytes + activeInFlightBytes);
                 task.progress = Math.min(50, Math.round((task.uploadedBytes / file.size) * 50));
 
                 const uploadedStr = this.formatBytes(task.uploadedBytes);
                 const totalStr = this.formatBytes(file.size);
-                const completedChunks = Math.round(confirmedBytes / INITIAL_CHUNK_SIZE);
-                const estimatedTotalChunks = Math.ceil(file.size / INITIAL_CHUNK_SIZE);
-                task.statusText = `${this.t('pushing', { uploaded: uploadedStr, total: totalStr })} (Mảnh ${completedChunks}/${estimatedTotalChunks})`;
+                const pct = Math.round((confirmedBytes / file.size) * 100);
+                task.statusText = `${this.t('pushing', { uploaded: uploadedStr, total: totalStr })} (${pct}%)`;
             };
 
             let schedulerResolve;
@@ -3472,89 +3471,116 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 schedulerResolve = () => {
                     if (_heartbeatTimer) { clearInterval(_heartbeatTimer); _heartbeatTimer = null; }
                     for (const w of workers) {
-                        w.reset();
+                        w.clearWatchdog();
                     }
                     resolve();
                 };
             });
 
+            // Watchdog: monitors a worker for stalls and timeouts
             const startWatchdog = (worker) => {
-                if (worker.watchdogInterval) {
-                    clearInterval(worker.watchdogInterval);
-                }
-                worker.watchdogInterval = setInterval(() => {
-                    const currentTask = this.uploadQueue.find(t => t.id === taskId);
-                    if (!currentTask || currentTask.isCancelled || currentTask.hasError) {
-                        worker.reset();
+                worker.clearWatchdog();
+                worker.watchdogTimer = setInterval(() => {
+                    const ct = this.uploadQueue.find(t => t.id === taskId);
+                    if (!ct || ct.isCancelled || ct.hasError) {
+                        worker.clearWatchdog();
+                        return;
+                    }
+                    if (worker.lifecycleState !== "STARTING" && worker.lifecycleState !== "TRANSFERRING") {
                         return;
                     }
 
                     const now = Date.now();
+
+                    // STARTING timeout
                     if (worker.lifecycleState === "STARTING") {
                         if (now - worker.requestStartTime > STARTING_TIMEOUT) {
                             logDiag('STALL_TIMEOUT', { range: worker.activeRange, state: "STARTING", workerId: worker.id });
                             triggerWorkerRecovery(worker, "STARTING_TIMEOUT");
+                            return;
                         }
-                    } else if (worker.lifecycleState === "TRANSFERRING") {
+                    }
+
+                    // TRANSFERRING stall detection
+                    if (worker.lifecycleState === "TRANSFERRING") {
                         if (now - worker.lastMeaningfulProgressTime > STALL_TIMEOUT) {
                             logDiag('STALL_TIMEOUT', { range: worker.activeRange, state: "TRANSFERRING", workerId: worker.id });
                             triggerWorkerRecovery(worker, "STALL");
-                        } else {
-                            const elapsed = (now - worker.requestStartTime) / 1000;
-                            if (elapsed > 5 && worker.ewmaThroughput > 0) {
-                                const remainingBytes = (worker.activeRange.end_byte - worker.activeRange.start_byte) - worker.currentLoadedBytes;
-                                const predictedTotalDuration = (elapsed * 1000) + (remainingBytes / worker.ewmaThroughput) * 1000;
-                                if (predictedTotalDuration > PREDICTIVE_SPLIT_LIMIT) {
-                                    logDiag('PREDICTIVE_TIMEOUT_RISK', { range: worker.activeRange, predictedTotalDuration, workerId: worker.id });
-                                    triggerWorkerRecovery(worker, "PREDICTIVE_TIMEOUT");
-                                }
+                            return;
+                        }
+
+                        // Predictive timeout
+                        const elapsed = (now - worker.requestStartTime) / 1000;
+                        if (elapsed > 5 && worker.ewmaThroughput > 0 && worker.activeRange) {
+                            const remainBytes = (worker.activeRange.end_byte - worker.activeRange.start_byte) - worker.currentLoadedBytes;
+                            const predictedTotal = (elapsed * 1000) + (remainBytes / worker.ewmaThroughput) * 1000;
+                            if (predictedTotal > PREDICTIVE_SPLIT_LIMIT) {
+                                logDiag('PREDICTIVE_TIMEOUT_RISK', { range: worker.activeRange, predictedTotal, workerId: worker.id });
+                                triggerWorkerRecovery(worker, "PREDICTIVE_TIMEOUT");
+                                return;
                             }
                         }
                     }
 
-                    if (worker.lifecycleState !== "IDLE" && !worker.recoveryStarted && (now - worker.requestStartTime > CLIENT_HARD_LIMIT)) {
+                    // Hard limit
+                    if (!worker.recoveryStarted && (now - worker.requestStartTime > CLIENT_HARD_LIMIT)) {
                         logDiag('CLIENT_HARD_LIMIT', { range: worker.activeRange, workerId: worker.id });
                         triggerWorkerRecovery(worker, "HARD_LIMIT");
                     }
                 }, WATCHDOG_INTERVAL);
             };
 
+            // Trigger recovery: abort XHR, nullify handlers to prevent double-fire, then recover
             const triggerWorkerRecovery = (worker, reason) => {
                 if (worker.recoveryStarted) return;
                 worker.recoveryStarted = true;
-                if (worker.xhr) {
-                    worker.xhr.onload = null;
-                    worker.xhr.onerror = null;
-                    worker.xhr.onabort = null;
-                    worker.xhr.abort();
+                worker.clearWatchdog();
+
+                const xhrRef = worker.xhr;
+                if (xhrRef) {
+                    xhrRef.upload.onprogress = null;
+                    xhrRef.onload = null;
+                    xhrRef.onerror = null;
+                    xhrRef.onabort = null;
+                    try { xhrRef.abort(); } catch(e) {}
                 }
-                if (task && task._xhrs && worker.xhr) {
-                    task._xhrs = task._xhrs.filter(x => x !== worker.xhr);
+                if (task && task._xhrs && xhrRef) {
+                    task._xhrs = task._xhrs.filter(x => x !== xhrRef);
                 }
                 handleWorkerFailure(worker, reason);
             };
 
+            // Handle a worker failure: query backend, compute missing bytes, split, requeue
             const handleWorkerFailure = async (worker, reason) => {
                 const failedRange = worker.activeRange;
+                worker.clearWatchdog();
                 worker.lifecycleState = "RECOVERING";
-                
+                worker.currentLoadedBytes = 0; // Remove temp progress
+
+                // Shrink this worker's chunk size only
                 worker.stableSuccessCount = 0;
+                const prevSize = worker.currentChunkSize;
                 worker.currentChunkSize = Math.max(MIN_CHUNK_SIZE, Math.floor(worker.currentChunkSize / 2));
-                logDiag('WORKER_SHRINK', { workerId: worker.id, chunkSize: worker.currentChunkSize, reason });
+                logDiag('WORKER_SHRINK', { workerId: worker.id, prevSize, newSize: worker.currentChunkSize, reason });
 
-                logDiag('CHECK_BACKEND', { taskId, reason: `Worker ${worker.id} failure recovery` });
-                try {
-                    const checkRes = await fetch(`/api/upload/check/${taskId}`);
-                    if (checkRes.ok) {
-                        const checkData = await checkRes.json();
-                        task.confirmedRanges = normalizeRanges(checkData.ranges || []);
+                // Update progress to remove failed worker's temp bytes
+                updateProgressUI();
+
+                // Query backend for authoritative confirmed state
+                if (failedRange) {
+                    logDiag('CHECK_BACKEND', { taskId, reason: `Worker ${worker.id} recovery: ${reason}` });
+                    try {
+                        const checkRes = await fetch(`/api/upload/check/${taskId}`);
+                        if (checkRes.ok) {
+                            const checkData = await checkRes.json();
+                            task.confirmedRanges = normalizeRanges(checkData.ranges || []);
+                        }
+                    } catch (e) {
+                        console.error("Failed to query backend during recovery:", e);
                     }
-                } catch (e) {
-                    console.error("Failed to query backend ranges during recovery:", e);
-                }
 
-                const missingGaps = subtractRanges(failedRange, task.confirmedRanges);
-                if (missingGaps.length > 0) {
+                    // Calculate exact missing bytes from the failed range
+                    const missingGaps = subtractRanges(failedRange, task.confirmedRanges);
                     for (const gap of missingGaps) {
                         const gapSize = gap.end_byte - gap.start_byte;
                         if (gapSize <= MIN_CHUNK_SIZE) {
@@ -3563,24 +3589,27 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                                 logDiag('DEFER_RANGE', { gap, workerId: worker.id });
                                 task.deferredRanges.push(gap);
                             } else {
-                                logDiag('RETRY_SMALL_RANGE', { gap, gapSizeKB: Math.round(gapSize/1024), retry: worker.retryCount, workerId: worker.id });
+                                logDiag('RETRY_SMALL_RANGE', { gap, sizeKB: Math.round(gapSize / 1024), retry: worker.retryCount, workerId: worker.id });
                                 task.pendingRanges.unshift(gap);
                             }
                         } else {
-                            const mid = Math.floor(gap.start_byte) + Math.floor(gapSize / 2);
-                            logDiag('SPLIT_RANGE', { gap, splitAt: mid, splitSizeKB: Math.round(gapSize/2/1024), workerId: worker.id });
-                            task.pendingRanges.unshift({ start_byte: Math.floor(mid), end_byte: Math.floor(gap.end_byte) });
-                            task.pendingRanges.unshift({ start_byte: Math.floor(gap.start_byte), end_byte: Math.floor(mid) });
+                            // Split the missing range in half
+                            const mid = Math.floor(gap.start_byte + gapSize / 2);
+                            logDiag('SPLIT_RANGE', { gap, splitAt: mid, halfKB: Math.round(gapSize / 2 / 1024), workerId: worker.id });
+                            task.pendingRanges.unshift({ start_byte: mid, end_byte: gap.end_byte });
+                            task.pendingRanges.unshift({ start_byte: gap.start_byte, end_byte: mid });
                         }
                     }
                 }
 
-                worker.reset();
+                // Reset worker to IDLE and immediately schedule
+                worker.resetForNextJob();
                 scheduleNext();
             };
 
+            // Start an XHR upload for a worker with a specific range
             const startWorkerXhr = (worker, range) => {
-                worker.reset();
+                worker.resetForNextJob();
                 worker.activeRange = range;
                 worker.lifecycleState = "STARTING";
                 worker.requestStartTime = Date.now();
@@ -3601,10 +3630,8 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
 
                 const xhr = new XMLHttpRequest();
                 worker.xhr = xhr;
-                if (task) {
-                    if (!task._xhrs) task._xhrs = [];
-                    task._xhrs.push(xhr);
-                }
+                if (!task._xhrs) task._xhrs = [];
+                task._xhrs.push(xhr);
 
                 xhr.open('POST', '/api/upload');
                 xhr.setRequestHeader('X-CSRF-Token', TeleCloud.getCsrfToken());
@@ -3613,52 +3640,58 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 startWatchdog(worker);
 
                 xhr.upload.onprogress = (e) => {
-                    if (e.lengthComputable) {
-                        const now = Date.now();
-                        if (worker.lifecycleState === "STARTING") {
-                            worker.lifecycleState = "TRANSFERRING";
-                            worker.firstProgressTime = now;
-                        }
+                    if (!e.lengthComputable) return;
+                    if (worker.lifecycleState !== "STARTING" && worker.lifecycleState !== "TRANSFERRING") return;
 
-                        if (e.loaded > worker.previousLoadedBytes) {
-                            worker.lastMeaningfulProgressTime = now;
-                            const delta = e.loaded - worker.previousLoadedBytes;
-                            worker.previousLoadedBytes = e.loaded;
-                            worker.currentLoadedBytes = e.loaded;
+                    const now = Date.now();
+                    if (worker.lifecycleState === "STARTING") {
+                        worker.lifecycleState = "TRANSFERRING";
+                        worker.firstProgressTime = now;
+                    }
 
-                            const sampleElapsed = (now - lastProgressTime) / 1000;
-                            if (sampleElapsed > 0.05 && delta > 0) {
-                                const instThroughput = delta / sampleElapsed;
-                                if (worker.ewmaThroughput === 0) {
-                                    worker.ewmaThroughput = instThroughput;
-                                } else {
-                                    worker.ewmaThroughput = (worker.ewmaThroughput * 0.8) + (instThroughput * 0.2);
-                                }
-                                updateTaskSpeed();
+                    if (e.loaded > worker.previousLoadedBytes) {
+                        worker.lastMeaningfulProgressTime = now;
+                        const delta = e.loaded - worker.previousLoadedBytes;
+                        worker.previousLoadedBytes = e.loaded;
+                        worker.currentLoadedBytes = e.loaded;
+
+                        const sampleElapsed = (now - lastProgressTime) / 1000;
+                        if (sampleElapsed > 0.05 && delta > 0) {
+                            const instThroughput = delta / sampleElapsed;
+                            if (worker.ewmaThroughput === 0) {
+                                worker.ewmaThroughput = instThroughput;
+                            } else {
+                                worker.ewmaThroughput = (worker.ewmaThroughput * 0.8) + (instThroughput * 0.2);
                             }
-                            lastProgressTime = now;
-
-                            updateProgressUI();
+                            updateTaskSpeed();
                         }
+                        lastProgressTime = now;
+                        updateProgressUI();
                     }
                 };
 
                 xhr.onload = () => {
-                    if (task && task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
+                    worker.clearWatchdog();
+                    if (task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
 
                     if (xhr.status >= 200 && xhr.status < 300) {
-                        worker.reset();
+                        // SUCCESS
+                        worker.retryCount = 0;
                         task.confirmedRanges.push(range);
                         task.confirmedRanges = normalizeRanges(task.confirmedRanges);
 
+                        // Per-worker adaptive chunk growth
                         worker.stableSuccessCount++;
                         if (worker.stableSuccessCount >= MIN_STABLE_SAMPLES_FOR_GROWTH) {
+                            let nextSize;
                             if (worker.ewmaThroughput > 0) {
-                                const nextSize = worker.ewmaThroughput * (TARGET_REQUEST_TIME / 1000);
-                                worker.currentChunkSize = Math.floor(Math.max(MIN_CHUNK_SIZE, Math.min(MAX_CHUNK_SIZE, nextSize)));
+                                nextSize = worker.ewmaThroughput * (TARGET_REQUEST_TIME / 1000);
                             } else {
-                                worker.currentChunkSize = Math.floor(Math.min(MAX_CHUNK_SIZE, worker.currentChunkSize * 1.5));
+                                nextSize = worker.currentChunkSize * 1.5;
                             }
+                            // Cap growth at 2x current to prevent jumping too large
+                            nextSize = Math.min(nextSize, worker.currentChunkSize * MAX_GROWTH_FACTOR);
+                            worker.currentChunkSize = Math.floor(Math.max(MIN_CHUNK_SIZE, Math.min(MAX_CHUNK_SIZE, nextSize)));
                             worker.stableSuccessCount = 0;
                             logDiag('WORKER_CHUNK_GROW', { workerId: worker.id, chunkSize: worker.currentChunkSize });
                         }
@@ -3672,8 +3705,11 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                             }
                         } catch (e) {}
 
+                        worker.resetForNextJob();
+                        updateProgressUI();
                         scheduleNext();
                     } else {
+                        // HTTP error (4xx, 5xx, etc.)
                         let errMsg = `Upload failed (${xhr.status})`;
                         try {
                             const errJson = JSON.parse(xhr.responseText);
@@ -3684,12 +3720,15 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 };
 
                 xhr.onerror = () => {
-                    if (task && task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
+                    worker.clearWatchdog();
+                    if (task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
                     handleWorkerFailure(worker, "Network Error");
                 };
 
                 xhr.onabort = () => {
-                    if (task && task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
+                    worker.clearWatchdog();
+                    if (task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
+                    // Only handle if not already triggered by watchdog recovery
                     if (!worker.recoveryStarted) {
                         handleWorkerFailure(worker, "Aborted");
                     }
@@ -3698,30 +3737,23 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 xhr.send(fd);
             };
 
+            // Main scheduler: assign work to idle workers
             const scheduleNext = () => {
                 const currentTask = this.uploadQueue.find(t => t.id === taskId);
-                logDiag('SCHEDULE_NEXT_CALL', {
-                    taskId,
-                    hasCurrentTask: !!currentTask,
-                    isCancelled: currentTask ? currentTask.isCancelled : false,
-                    hasError: task.hasError,
-                    inFlightCount: workers.filter(w => w.lifecycleState !== "IDLE").length,
-                    pendingCount: task.pendingRanges.length,
-                    deferredCount: task.deferredRanges.length
-                });
 
                 if (!currentTask || currentTask.isCancelled) {
                     schedulerResolve();
                     return;
                 }
-
                 if (task.hasError) {
                     schedulerResolve();
                     return;
                 }
 
+                // Check completion
                 const confirmedBytes = countConfirmedBytes();
-                if (confirmedBytes >= file.size) {
+                if (confirmedBytes >= file.size && !task._completionTriggered) {
+                    task._completionTriggered = true;
                     logDiag('COMPLETE', { taskId });
                     task.progress = 50;
                     task.statusText = this.t('syncing_tg');
@@ -3729,32 +3761,53 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                     return;
                 }
 
-                if (task.pendingRanges.length === 0 && workers.every(w => w.lifecycleState === "IDLE") && task.deferredRanges.length > 0) {
-                    logDiag('RESUME_RANGE', { deferredCount: task.deferredRanges.length });
+                const allIdle = workers.every(w => w.lifecycleState === "IDLE");
+
+                // Resume deferred ranges if nothing else is available
+                if (task.pendingRanges.length === 0 && allIdle && task.deferredRanges.length > 0) {
+                    logDiag('RESUME_DEFERRED', { deferredCount: task.deferredRanges.length });
                     task.pendingRanges = [...task.deferredRanges];
                     task.deferredRanges = [];
                 }
 
-                if (task.pendingRanges.length === 0 && workers.every(w => w.lifecycleState === "IDLE")) {
-                    logDiag('FAILED', { taskId, reason: "No more ranges to upload and target size not met" });
-                    task.statusText = this.t('conn_error');
-                    task.hasError = true;
-                    schedulerResolve();
-                    return;
+                // Check if truly stuck
+                if (task.pendingRanges.length === 0 && allIdle) {
+                    // Double-check with dynamic gap calculation
+                    const dynGaps = subtractRanges({ start_byte: 0, end_byte: file.size }, task.confirmedRanges);
+                    if (dynGaps.length > 0) {
+                        logDiag('DYNAMIC_GAP_RECOVERY', { gapCount: dynGaps.length });
+                        task.pendingRanges = dynGaps;
+                    } else if (confirmedBytes >= file.size && !task._completionTriggered) {
+                        task._completionTriggered = true;
+                        logDiag('COMPLETE', { taskId });
+                        task.progress = 50;
+                        task.statusText = this.t('syncing_tg');
+                        schedulerResolve();
+                        return;
+                    } else {
+                        logDiag('FAILED', { taskId, reason: "No more ranges and target not met" });
+                        task.statusText = this.t('conn_error');
+                        task.hasError = true;
+                        schedulerResolve();
+                        return;
+                    }
                 }
 
+                // Assign ranges to idle workers
                 for (const w of workers) {
                     if (w.lifecycleState === "IDLE") {
                         const nextRange = getNextRangeForWorker(w);
-                        if (nextRange) {
+                        if (nextRange && nextRange.end_byte > nextRange.start_byte) {
                             startWorkerXhr(w, nextRange);
                         }
                     }
                 }
             };
 
+            // Kick off the scheduler
             scheduleNext();
 
+            // Safety heartbeat: restart scheduler if it stalls
             _heartbeatTimer = setInterval(() => {
                 const hbTask = this.uploadQueue.find(t => t.id === taskId);
                 if (!hbTask || hbTask.isCancelled || hbTask.hasError) {
@@ -3763,9 +3816,14 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                 if (countConfirmedBytes() >= file.size) {
                     clearInterval(_heartbeatTimer); _heartbeatTimer = null; return;
                 }
-                if (workers.every(w => w.lifecycleState === "IDLE") && (task.pendingRanges.length > 0 || task.deferredRanges.length > 0)) {
+                const allIdle = workers.every(w => w.lifecycleState === "IDLE");
+                if (allIdle && (task.pendingRanges.length > 0 || task.deferredRanges.length > 0)) {
                     logDiag('HEARTBEAT_RESTART', { pendingCount: task.pendingRanges.length, deferredCount: task.deferredRanges.length });
                     scheduleNext();
+                }
+                // Also heartbeat-check if workers are active but backend has full coverage
+                if (!allIdle) {
+                    updateProgressUI();
                 }
             }, 4000);
 
@@ -4397,7 +4455,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
             this.imageViewer.transitionDirection = 'next';
             const files = this.imageViewer.slideshowFiles;
             if (!files || files.length === 0) return;
-            // Only 1 image: reschedule timer without reloading (src unchanged → @load won't fire)
+            // Only 1 image: reschedule timer without reloading (src unchanged â†’ @load won't fire)
             if (files.length === 1) {
                 if (this.imageViewer.slideshowInterval && this.imageViewer.slideshowInterval !== 'waiting') {
                     clearTimeout(this.imageViewer.slideshowInterval);
@@ -4866,7 +4924,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
             //    Guard: only clear state if the viewer has NOT been reopened for another file
             //    during the 400ms window (prevents the deferred null from blanking a fresh open).
             setTimeout(() => {
-                if (this.comicViewer.show) return; // viewer was reopened — leave state alone
+                if (this.comicViewer.show) return; // viewer was reopened â€” leave state alone
                 if (this.comicViewer.file && closingFile &&
                     (String(this.comicViewer.file.id) !== String(closingFile.id) ||
                      this.comicViewer.file.filename !== closingFile.filename)) return; // different file opened
@@ -7364,7 +7422,7 @@ function shareApp() {
             this.imageViewer.transitionDirection = 'next';
             const files = this.imageViewer.slideshowFiles;
             if (!files || files.length === 0) return;
-            // Only 1 image: reschedule timer without reloading (src unchanged → @load won't fire)
+            // Only 1 image: reschedule timer without reloading (src unchanged â†’ @load won't fire)
             if (files.length === 1) {
                 if (this.imageViewer.slideshowInterval && this.imageViewer.slideshowInterval !== 'waiting') {
                     clearTimeout(this.imageViewer.slideshowInterval);
@@ -7834,7 +7892,7 @@ function shareApp() {
             this.comicViewer.autoScrollActive = false;
             const urls = this.comicViewer.pageUrls ? [...this.comicViewer.pageUrls] : [];
             setTimeout(() => {
-                if (this.comicViewer.show) return; // viewer was reopened — leave state alone
+                if (this.comicViewer.show) return; // viewer was reopened â€” leave state alone
                 const pageImg = document.getElementById('comic-viewer-img') || document.getElementById('comic-viewer-img-file') || document.getElementById('comic-viewer-img-folder');
                 if (pageImg) pageImg.removeAttribute('src');
                 this.comicViewer.file = null;
@@ -9575,7 +9633,7 @@ function shareFileApp() {
             this.comicViewer.autoScrollActive = false;
             const urls = this.comicViewer.pageUrls ? [...this.comicViewer.pageUrls] : [];
             setTimeout(() => {
-                if (this.comicViewer.show) return; // viewer was reopened — leave state alone
+                if (this.comicViewer.show) return; // viewer was reopened â€” leave state alone
                 const pageImg = document.getElementById('comic-viewer-img') || document.getElementById('comic-viewer-img-file') || document.getElementById('comic-viewer-img-folder');
                 if (pageImg) pageImg.removeAttribute('src');
                 this.comicViewer.file = null;
