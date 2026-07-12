@@ -230,6 +230,7 @@ func ProcessYTDLPUpload(ctx context.Context, url, formatID, path, taskID, downlo
 
 	// Register for cancellation
 	taskMutex.Lock()
+	delete(UploadTasks, taskID)
 	TaskCancels[taskID] = cancel
 	taskMutex.Unlock()
 	defer func() {

@@ -648,6 +648,7 @@ func (m *maxSizeReader) Read(p []byte) (n int, err error) {
 func ProcessCompleteUpload(ctx context.Context, filePath, filename, path, mimeType, taskID string, cfg *config.Config, overwrite bool, owner string) {
 	ctx, cancel := context.WithCancel(ctx)
 	taskMutex.Lock()
+	delete(UploadTasks, taskID)
 	TaskCancels[taskID] = cancel
 	taskMutex.Unlock()
 
@@ -839,6 +840,7 @@ func ProcessRemoteUpload(ctx context.Context, url, path, taskID string, cfg *con
 
 	ctx, cancel := context.WithCancel(ctx)
 	taskMutex.Lock()
+	delete(UploadTasks, taskID)
 	TaskCancels[taskID] = cancel
 	taskMutex.Unlock()
 
@@ -1250,6 +1252,7 @@ func ProcessCompleteUploadSync(ctx context.Context, filePath, filename, path, mi
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(ctx)
 		taskMutex.Lock()
+		delete(UploadTasks, taskID)
 		TaskCancels[taskID] = cancel
 		taskMutex.Unlock()
 		defer func() {
@@ -1563,6 +1566,7 @@ func ProcessRemoteUploadSync(ctx context.Context, url, path, taskID string, cfg 
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(ctx)
 		taskMutex.Lock()
+		delete(UploadTasks, taskID)
 		TaskCancels[taskID] = cancel
 		taskMutex.Unlock()
 		defer func() {
