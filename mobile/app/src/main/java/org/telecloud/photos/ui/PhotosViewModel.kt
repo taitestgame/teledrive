@@ -237,6 +237,7 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
             if (cloudMedia.isFolder) return@forEach
             val key = cloudMedia.filename.lowercase(java.util.Locale.ROOT)
             val matchedLocal = localByName[key]
+            Log.d("PhotosViewModel", "Matching cloud file: '$key' (Size: ${cloudMedia.size}), match found: ${matchedLocal != null} (Local name: '${matchedLocal?.displayName}', Local size: ${matchedLocal?.size})")
             if (matchedLocal != null) {
                 val idx = result.indexOfFirst { it.id == matchedLocal.id }
                 if (idx != -1) {
@@ -449,7 +450,7 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 item.copy(backupStatus = status)
             } else {
-                item.copy(backupStatus = BackupStatus.NOT_BACKED_UP)
+                item
             }
         }
         _mediaItems.value = updated
