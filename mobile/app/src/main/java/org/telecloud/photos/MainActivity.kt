@@ -1045,7 +1045,7 @@ fun GalleryScreen(
                     horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
                     if (!isSelectionMode && !isSearchActive && sortOrder == SortOrder.DATE_DESC) {
-                        item(span = { GridItemSpan(maxCurrentLineSpan) }) {
+                        item(span = { GridItemSpan(gridColumns) }) {
                             FeaturedMemoriesCarousel(sortedItems, viewModel.getNetworkClient())
                         }
                     }
@@ -1060,7 +1060,7 @@ fun GalleryScreen(
                         },
                         span = { idx ->
                             when (galleryEntries[idx]) {
-                                is GalleryEntry.Header -> GridItemSpan(maxCurrentLineSpan)
+                                is GalleryEntry.Header -> GridItemSpan(gridColumns)
                                 is GalleryEntry.Media  -> GridItemSpan(1)
                             }
                         }
