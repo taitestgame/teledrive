@@ -1,0 +1,7 @@
+tunnel: aac3ef84-2f49-4769-92ad-3de686a20f66
+credentials-file: C:\Users\taitest\.cloudflared\aac3ef84-2f49-4769-92ad-3de686a20f66.json
+
+ingress:
+  - hostname: telecloud.taitestgame.indevs.in
+    service: http://127.0.0.1:5000
+  - service: http_status:404

@@ -3239,7 +3239,7 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
         },
 
         async uploadSingleFile(file, taskId, targetPath, overwrite = false) {
-            const CHUNK_SIZE = 50 * 1024 * 1024;
+            const CHUNK_SIZE = 20 * 1024 * 1024;
             const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
             let hasError = false;
             let task = this.uploadQueue.find(t => t.id === taskId);
@@ -3321,7 +3321,11 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                             if (task && !task.statusText.includes(this.t('status_error'))) {
                                 const uploadedStr = this.formatBytes(task.uploadedBytes || 0);
                                 const totalStr = this.formatBytes(file.size);
-                                task.statusText = `${this.t('pushing', { uploaded: uploadedStr, total: totalStr })} ${retries < 3 ? '(' + this.t('retry') + ' ' + (3 - retries) + ')' : ''}`;
+                                const completedChunks = task._progressMap ? task._progressMap.filter((b, idx) => {
+                                    const expected = (idx === totalChunks - 1) ? (file.size % CHUNK_SIZE || CHUNK_SIZE) : CHUNK_SIZE;
+                                    return b >= expected;
+                                }).length : 0;
+                                task.statusText = `${this.t('pushing', { uploaded: uploadedStr, total: totalStr })} (Mảnh ${completedChunks}/${totalChunks}) ${retries < 3 ? '(' + this.t('retry') + ' ' + (3 - retries) + ')' : ''}`;
                             }
 
 
@@ -3334,9 +3338,27 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
 
                                 xhr.open('POST', '/api/upload');
                                 xhr.setRequestHeader('X-CSRF-Token', TeleCloud.getCsrfToken());
+                                xhr.timeout = 180000; // Large overall timeout to allow slow connections
                                 
+                                let lastProgressTime = Date.now();
+                                const watchdog = setInterval(() => {
+                                    const t = this.uploadQueue.find(q => q.id === taskId);
+                                    if (!t || t.isCancelled) {
+                                        clearInterval(watchdog);
+                                        return;
+                                    }
+                                    // If no progress event is received for 2 seconds, abort and trigger immediate retry
+                                    if (Date.now() - lastProgressTime > 2000) {
+                                        clearInterval(watchdog);
+                                        xhr.abort();
+                                    }
+                                }, 500);
+
+                                const cleanupWatchdog = () => clearInterval(watchdog);
+
                                 xhr.upload.onprogress = (e) => {
                                     if (e.lengthComputable) {
+                                        lastProgressTime = Date.now(); // Reset progress timer on any active upload progress
                                         const now = Date.now();
                                         const task = this.uploadQueue.find(t => t.id === taskId);
                                         if (task && task._progressMap) {
@@ -3367,11 +3389,16 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                                             // Real-time byte progress in status text
                                             const uploadedStr = this.formatBytes(task.uploadedBytes);
                                             const totalStr = this.formatBytes(file.size);
-                                            task.statusText = this.t('pushing', { uploaded: uploadedStr, total: totalStr });
+                                            const completedChunks = task._progressMap.filter((b, idx) => {
+                                                const expected = (idx === totalChunks - 1) ? (file.size % CHUNK_SIZE || CHUNK_SIZE) : CHUNK_SIZE;
+                                                return b >= expected;
+                                            }).length;
+                                            task.statusText = `${this.t('pushing', { uploaded: uploadedStr, total: totalStr })} (Mảnh ${completedChunks}/${totalChunks})`;
                                         }
                                     }
                                 };
                                 xhr.onload = () => {
+                                    cleanupWatchdog();
                                     const task = this.uploadQueue.find(t => t.id === taskId);
                                     if (task && task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
                                     
@@ -3391,13 +3418,23 @@ function cloudApp(initialIsLoggedIn, isAdmin = true, storageUsed = 0, webdavEnab
                                     }
                                 };
                                 xhr.onerror = () => {
+                                    cleanupWatchdog();
                                     const task = this.uploadQueue.find(t => t.id === taskId);
                                     if (task) {
                                         if (task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
                                     }
                                     reject(new Error(this.t('conn_error')));
                                 };
+                                xhr.ontimeout = () => {
+                                    cleanupWatchdog();
+                                    const task = this.uploadQueue.find(t => t.id === taskId);
+                                    if (task) {
+                                        if (task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);
+                                    }
+                                    reject(new Error(this.t('conn_error') + ' (Timeout)'));
+                                };
                                 xhr.onabort = () => {
+                                    cleanupWatchdog();
                                     const task = this.uploadQueue.find(t => t.id === taskId);
                                     if (task) {
                                         if (task._xhrs) task._xhrs = task._xhrs.filter(x => x !== xhr);

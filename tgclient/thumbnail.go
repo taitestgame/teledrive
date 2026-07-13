@@ -139,9 +139,27 @@ func RegenerateFileThumbnail(ctx context.Context, fileID int64, cfg *config.Conf
 			defer reader.Close()
 			if img, _, errDec := image.Decode(reader); errDec == nil {
 				bounds := img.Bounds()
+				
+				// 1. Generate Preview (max 1280px dimension)
+				previewWidth := bounds.Max.X
+				previewHeight := bounds.Max.Y
+				if previewWidth > 1280 {
+					previewHeight = (previewHeight * 1280) / previewWidth
+					previewWidth = 1280
+				}
+				dstPreview := image.NewRGBA(image.Rect(0, 0, previewWidth, previewHeight))
+				draw.BiLinear.Scale(dstPreview, dstPreview.Bounds(), img, img.Bounds(), draw.Src, nil)
+
+				previewPath := strings.TrimSuffix(thumbPath, ".jpg") + "_preview.jpg"
+				outPrev, errPrev := os.Create(previewPath)
+				if errPrev == nil {
+					jpeg.Encode(outPrev, dstPreview, &jpeg.Options{Quality: 80})
+					outPrev.Close()
+				}
+
+				// 2. Generate Thumbnail (max 320px dimension)
 				width := bounds.Max.X
 				height := bounds.Max.Y
-
 				if width > 320 {
 					height = (height * 320) / width
 					width = 320
@@ -215,11 +233,13 @@ func generateThumbnailWithFFmpeg(ctx context.Context, fileID int64, actualMime s
 	localURL := fmt.Sprintf("http://%s:%s/api/temp-stream/%s", host, cfg.Port, token)
 
 	var cmd *exec.Cmd
+	previewPath := strings.TrimSuffix(thumbPath, ".jpg") + "_preview.jpg"
+
 	if isImage {
 		cmd = exec.Command(
 			cfg.FFMPEGPath, "-y", "-i", localURL,
 			"-vframes", "1",
-			"-vf", "scale=320:-1", thumbPath,
+			"-vf", "scale='min(1280,iw)':-1", previewPath,
 		)
 	} else if strings.HasPrefix(actualMime, "video/") {
 		cmd = exec.Command(
@@ -257,6 +277,23 @@ func generateThumbnailWithFFmpeg(ctx context.Context, fileID int64, actualMime s
 	case err := <-errCh:
 		if err != nil {
 			return fmt.Errorf("ffmpeg error: %w", err)
+		}
+	}
+
+	// For images, generate thumbnail from the newly generated preview
+	if isImage {
+		thumbCmd := exec.Command(
+			cfg.FFMPEGPath, "-y", "-i", previewPath,
+			"-vf", "scale=320:-1", thumbPath,
+		)
+		if err := thumbCmd.Run(); err != nil {
+			// Fallback: if scaling from preview fails, try direct from localURL
+			fallbackCmd := exec.Command(
+				cfg.FFMPEGPath, "-y", "-i", localURL,
+				"-vframes", "1",
+				"-vf", "scale=320:-1", thumbPath,
+			)
+			fallbackCmd.Run()
 		}
 	}
 

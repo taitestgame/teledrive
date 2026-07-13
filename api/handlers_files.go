@@ -1807,4 +1807,170 @@ func (h *Handler) handleRegenerateThumb(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "has_thumb": hasThumb})
 }
 
+func (h *Handler) handleGetMedia(c *gin.Context) {
+	username := c.GetString("username")
+	limitStr := c.DefaultQuery("limit", "100")
+	cursorStr := c.DefaultQuery("cursor", "")
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+
+	var cursor int64
+	if cursorStr != "" {
+		cursor, _ = strconv.ParseInt(cursorStr, 10, 64)
+	}
+
+	var files []database.File
+	var query string
+	var args []interface{}
+
+	if cursor > 0 {
+		query = "SELECT * FROM files WHERE owner = ? AND is_folder = FALSE AND deleted_at IS NULL AND (mime_type LIKE 'image/%' OR mime_type LIKE 'video/%') AND id < ? ORDER BY id DESC LIMIT ?"
+		args = []interface{}{username, cursor, limit}
+	} else {
+		query = "SELECT * FROM files WHERE owner = ? AND is_folder = FALSE AND deleted_at IS NULL AND (mime_type LIKE 'image/%' OR mime_type LIKE 'video/%') ORDER BY id DESC LIMIT ?"
+		args = []interface{}{username, limit}
+	}
+
+	err = database.RODB.Select(&files, query, args...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	type MediaMetadata struct {
+		CloudMediaId   int64  `json:"cloudMediaId"`
+		Fingerprint    string `json:"fingerprint"`
+		Filename       string `json:"filename"`
+		MimeType       string `json:"mimeType"`
+		OriginalSize   int64  `json:"originalSize"`
+		ThumbnailId    int64  `json:"thumbnailId"`
+		PreviewId      int64  `json:"previewId"`
+		OriginalFileId int64  `json:"originalFileId"`
+		Width          int    `json:"width"`
+		Height         int    `json:"height"`
+		Duration       int64  `json:"duration"`
+		DateCreated    string `json:"dateCreated"`
+		DateModified   string `json:"dateModified"`
+		UploadedAt     string `json:"uploadedAt"`
+	}
+
+	mediaList := make([]MediaMetadata, 0, len(files))
+	for _, f := range files {
+		mimeVal := ""
+		if f.MimeType != nil {
+			mimeVal = *f.MimeType
+		}
+		rfcTime := f.CreatedAt.Format(time.RFC3339)
+		fid := int64(f.ID)
+		mediaList = append(mediaList, MediaMetadata{
+			CloudMediaId:   fid,
+			Fingerprint:    "",
+			Filename:       f.Filename,
+			MimeType:       mimeVal,
+			OriginalSize:   f.Size,
+			ThumbnailId:    fid,
+			PreviewId:      fid,
+			OriginalFileId: fid,
+			Width:          0,
+			Height:         0,
+			Duration:       0,
+			DateCreated:    rfcTime,
+			DateModified:   rfcTime,
+			UploadedAt:     rfcTime,
+		})
+	}
+
+	var nextCursor int64
+	if len(files) > 0 {
+		nextCursor = int64(files[len(files)-1].ID)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"media":      mediaList,
+		"nextCursor": nextCursor,
+	})
+}
+
+func (h *Handler) handleGetMediaThumbnail(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.AbortWithStatus(http.StatusBadRequest)
+		return
+	}
+	var item database.File
+	username := c.GetString("username")
+	if err := database.RODB.Get(&item, "SELECT id, filename, mime_type, is_folder, thumb_path, owner FROM files WHERE id = ? AND owner = ?", id, username); err != nil {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+
+	if item.ThumbPath != nil && *item.ThumbPath != "" {
+		if _, err := os.Stat(*item.ThumbPath); err == nil {
+			c.File(*item.ThumbPath)
+			return
+		}
+	}
+
+	if !item.IsFolder {
+		newPath, err := tgclient.RegenerateFileThumbnail(c.Request.Context(), int64(item.ID), h.cfg)
+		if err == nil && newPath != nil {
+			c.File(*newPath)
+			return
+		}
+	}
+
+	h.handleStreamFile(c)
+}
+
+func (h *Handler) handleGetMediaPreview(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.AbortWithStatus(http.StatusBadRequest)
+		return
+	}
+	var item database.File
+	username := c.GetString("username")
+	if err := database.RODB.Get(&item, "SELECT id, filename, mime_type, is_folder, thumb_path, owner FROM files WHERE id = ? AND owner = ?", id, username); err != nil {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+
+	if item.ThumbPath != nil && *item.ThumbPath != "" {
+		previewPath := strings.TrimSuffix(*item.ThumbPath, ".jpg") + "_preview.jpg"
+		if _, err := os.Stat(previewPath); err == nil {
+			c.File(previewPath)
+			return
+		}
+		if !item.IsFolder && item.MimeType != nil && strings.HasPrefix(*item.MimeType, "image/") {
+			_, err := tgclient.RegenerateFileThumbnail(c.Request.Context(), int64(item.ID), h.cfg)
+			if err == nil {
+				if _, err := os.Stat(previewPath); err == nil {
+					c.File(previewPath)
+					return
+				}
+			}
+		}
+		c.File(*item.ThumbPath)
+		return
+	}
+
+	if !item.IsFolder {
+		newPath, err := tgclient.RegenerateFileThumbnail(c.Request.Context(), int64(item.ID), h.cfg)
+		if err == nil && newPath != nil {
+			previewPath := strings.TrimSuffix(*newPath, ".jpg") + "_preview.jpg"
+			if _, err := os.Stat(previewPath); err == nil {
+				c.File(previewPath)
+				return
+			}
+			c.File(*newPath)
+			return
+		}
+	}
+
+	h.handleStreamFile(c)
+}
+
 
