@@ -24,6 +24,9 @@ class NetworkClient(private val context: Context) {
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
     )
 
+    @Volatile
+    private var cachedAuthHeader: String? = null
+
     private val cookieJar = object : CookieJar {
         override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
             val tokenCookie = cookies.find { it.name == "session_token" }
@@ -81,6 +84,7 @@ class NetworkClient(private val context: Context) {
             .putString("username", username)
             .putString("password", password)
             .apply()
+        cachedAuthHeader = okhttp3.Credentials.basic(username, password)
     }
 
     fun clearSession() {
@@ -88,6 +92,7 @@ class NetworkClient(private val context: Context) {
             .remove("username")
             .remove("password")
             .apply()
+        cachedAuthHeader = null
     }
 
     fun hasCredentials(): Boolean {
@@ -95,16 +100,21 @@ class NetworkClient(private val context: Context) {
     }
 
     fun getAuthorizationHeader(): String? {
+        val cached = cachedAuthHeader
+        if (cached != null) return cached
         val username = prefs.getString("username", null)
         val password = prefs.getString("password", null)
         if (username != null && password != null) {
-            return okhttp3.Credentials.basic(username, password)
+            val header = okhttp3.Credentials.basic(username, password)
+            cachedAuthHeader = header
+            return header
         }
         return null
     }
 
     fun clearAll() {
         prefs.edit().clear().apply()
+        cachedAuthHeader = null
     }
 
     fun isWifiOnly(): Boolean {

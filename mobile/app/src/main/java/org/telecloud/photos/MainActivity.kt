@@ -2055,7 +2055,9 @@ fun GalleryGridItem(
                 onLongClick = onLongClick
             )
     ) {
-        val (modelData, headers) = getMediaUrlSource(item, "thumbnail", networkClient)
+        val (modelData, headers) = remember(item.id, item.contentUri) {
+            getMediaUrlSource(item, "thumbnail", networkClient)
+        }
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current)
                 .data(modelData)
@@ -2200,7 +2202,9 @@ fun GalleryListItem(
                         .size(60.dp)
                         .clip(RoundedCornerShape(6.dp))
                 ) {
-                    val (modelData, headers) = getMediaUrlSource(item, "thumbnail", networkClient)
+                    val (modelData, headers) = remember(item.id, item.contentUri) {
+                        getMediaUrlSource(item, "thumbnail", networkClient)
+                    }
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
                             .data(modelData)
@@ -2230,7 +2234,9 @@ fun GalleryListItem(
                         .size(60.dp)
                         .clip(RoundedCornerShape(6.dp))
                 ) {
-                    val (modelData, headers) = getMediaUrlSource(item, "thumbnail", networkClient)
+                    val (modelData, headers) = remember(item.id, item.contentUri) {
+                        getMediaUrlSource(item, "thumbnail", networkClient)
+                    }
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
                             .data(modelData)
