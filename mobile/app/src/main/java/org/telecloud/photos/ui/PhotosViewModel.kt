@@ -231,12 +231,12 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
         roomCloudItems: List<CloudMedia>
     ): List<MediaItem> {
         val result = localItems.toMutableList()
-        val localByNameAndSize = localItems.associateBy { it.displayName to it.size }
+        val localByName = localItems.associateBy { it.displayName.lowercase(java.util.Locale.ROOT) }
 
         roomCloudItems.forEach { cloudMedia ->
             if (cloudMedia.isFolder) return@forEach
-            val key = cloudMedia.filename to cloudMedia.size
-            val matchedLocal = localByNameAndSize[key]
+            val key = cloudMedia.filename.lowercase(java.util.Locale.ROOT)
+            val matchedLocal = localByName[key]
             if (matchedLocal != null) {
                 val idx = result.indexOfFirst { it.id == matchedLocal.id }
                 if (idx != -1) {

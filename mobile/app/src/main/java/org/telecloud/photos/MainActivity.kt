@@ -3296,11 +3296,11 @@ fun downloadAndSaveOriginal(
             }
             
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                android.widget.Toast.makeText(context, "Saved ${item.displayName} to device gallery!", android.widget.Toast.LENGTH_LONG).show()
+                android.widget.Toast.makeText(context, "Tải thành công file ${item.displayName} về bộ sưu tập!", android.widget.Toast.LENGTH_LONG).show()
             }
         } catch (e: Exception) {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                android.widget.Toast.makeText(context, "Download failed: ${e.localizedMessage}", android.widget.Toast.LENGTH_LONG).show()
+                android.widget.Toast.makeText(context, "Tải file thất bại: ${e.localizedMessage}", android.widget.Toast.LENGTH_LONG).show()
             }
         }
     }
