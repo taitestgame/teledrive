@@ -1,4 +1,4 @@
-#Tue Jul 14 01:07:54 ICT 2026
+#Tue Jul 14 01:19:50 ICT 2026
 base.0=C\:\\code\\python\\telecloau\\telecloud-go\\mobile\\app\\build\\intermediates\\dex\\debug\\mergeExtDexDebug\\classes.dex
 base.1=C\:\\code\\python\\telecloau\\telecloud-go\\mobile\\app\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\0\\classes.dex
 base.2=C\:\\code\\python\\telecloau\\telecloud-go\\mobile\\app\\build\\intermediates\\dex\\debug\\mergeProjectDexDebug\\11\\classes.dex

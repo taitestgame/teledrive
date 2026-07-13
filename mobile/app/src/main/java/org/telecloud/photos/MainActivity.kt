@@ -1001,7 +1001,7 @@ fun GalleryScreen(
             } else {
                 LazyVerticalGrid(
                     state = gridState,
-                    columns = GridCells.Adaptive(minSize = animatedCellSizeDp),
+                    columns = GridCells.Fixed(gridColumns),
                     modifier = Modifier
                         .fillMaxSize()
                         .weight(1f)
