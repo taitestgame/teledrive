@@ -236,9 +236,8 @@ func (r *tgFileReader) triggerPrefetch(offset int64, limit int64) {
 			return
 		}
 
-		// Use a different bot than the one used for sync fallback
-		fetchAPI := GetAPI()
-		data, err := r.fetchChunk(fetchAPI, offset, limit)
+		// Use the reader's api client to ensure file_reference validity
+		data, err := r.fetchChunk(r.api, offset, limit)
 		if err != nil {
 			return
 		}
